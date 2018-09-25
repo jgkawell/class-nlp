@@ -1,9 +1,6 @@
 # basic "most frequent tag" system to just make a start on the project
-def mostFreq():
-
-    print("hello")
-
-
+def calcStats():
+    
     f = open("berp-POS-training.txt", "r")
 
     file_length = 0
@@ -11,7 +8,8 @@ def mostFreq():
     words = []
     parts = []
     for line in f:
-        fields = line.split("\t")
+
+        fields = line.rstrip("\n\r").split("\t")
 
         if len(fields) > 1:
             word_nums.append(fields[0])
@@ -20,10 +18,10 @@ def mostFreq():
 
         file_length += 1
 
-    for i in range(0, 15):
-        print(str(word_nums[i]) + ", " + str(words[i]) + ", " + str(parts[i]))
+    print("Number of lines: " + str(file_length))    
 
-    print(str(file_length))
+    
+
 
 if  __name__ == "__main__":
-    mostFreq()
+    calcStats()
