@@ -65,10 +65,20 @@ def findTokens():
     _train_data = getLists(_train_file_name)
 
     # get the list of word types
-    _word_types = list(Counter(_train_data[1]).keys())
+    word_counter = Counter(_train_data[1])
+    _word_types = list(word_counter.keys())
 
     #  get the list of unique parts of speach
-    _part_types = list(Counter(_train_data[2]).keys())
+    part_counter = Counter(_train_data[2])
+    _part_types = list(part_counter.keys())
+
+    _word_tokens = []
+    for word in _word_types:
+        _word_tokens.append(word_counter.get(word))
+
+    _part_tokens = []
+    for part in _part_types:
+        _part_tokens.append(part_counter.get(part))
 
 # pulls out the nums, words, and pos data as lists
 def getLists(file_name):
