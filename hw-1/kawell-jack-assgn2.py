@@ -1,8 +1,8 @@
 from collections import Counter
 import numpy as np
+import random
 
 # initialize the data field variables
-_train = []
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
 _unique_parts = []
 _unique_words = []
@@ -24,27 +24,42 @@ def preprocessForBasicAnalysis():
     train_file = open(_train_file_name, "w")
     dev_file = open(_dev_file_name, "w")
 
-    # pull out the lines into a list
-    train_lines = []
-    count = 0
+    # pull out the sentences from the lines
+    train_sentences = []
+    temp_sentence = []
     for line in full_file:
-        count += 1
-        train_lines.append(line)
+        temp_sentence.append(line)
+        if line == "\n":
+            train_sentences.append(temp_sentence.copy())
+            temp_sentence = []
+        
+    # get a random sampling of sentence indices
+    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / 2))
 
-    # sample from the full training set to make a smaller training and dev set
-    dev_lines = np.random.choice(train_lines, int(count / 10), False)
+    # pull out the sentences into train and dev sets
+    dev_sentences = []
+    count = 0
+    for i in sample:
+        i -= count
+        dev_sentences.append(train_sentences.pop(i))
+        count += 1
 
     # fill training file
-    for line in train_lines:
-        train_file.write(line)
+    for sentence in train_sentences:
+        for line in sentence:
+            train_file.write(line)
 
     # fill dev file
-    for line in dev_lines:
-        dev_file.write(line)
+    for sentence in dev_sentences:
+        for line in sentence:
+            dev_file.write(line)
 
 
 # find stats for basic analysis
 def findStatsForBasicAnalysis():
+    global _train_data
+    global _unique_words
+    global _unique_parts
 
     _train_data = getFileData(_train_file_name)
 
@@ -75,12 +90,17 @@ def getFileData(file_name):
             nums.append(fields[0])
             words.append(fields[1])
             parts.append(fields[2])
+        else:
+            nums.append(0)
+            words.append(0)
+            parts.append(0)
 
     return (nums, words, parts)
 
 
 # basic "most frequent tag" system to just make a start on the project
 def trainForBasicAnalysis():
+    global _pos_counts
 
     # count the pos tags associated with words
     _pos_counts = np.zeros((len(_unique_words), len(_unique_parts)))
@@ -99,8 +119,9 @@ def modelForBasicAnalysis(word):
     # if the word exists in the training data find the most common pos
     # if not, an exception will be thrown and we'll guess that it's a noun
     pos = "?"
+    unique = _unique_words
     try:
-        word_index = _unique_words.index(word)
+        word_index = unique.index(word)
         part_index = np.argmax(_pos_counts[word_index])
         pos = _unique_parts[part_index]
     except:
@@ -111,16 +132,21 @@ def modelForBasicAnalysis(word):
 
 
 #  test using the basic "most frequent tag" technique
-def test():
+def testForBasicAnalysis():
 
+    # create results file
     results_file = open(_results_file_name, "w")
     
+    # retrieve data to run through model
     dev_data = getFileData(_dev_file_name)
 
-    count = 0
-    for word in dev_data[1]:
-        dev_data[2][count]
-        count += 1
+    # write predictions to test file
+    for i in range(0, len(dev_data[1])):
+        if dev_data[0][i] == 0:
+            results_file.write("\n")
+        else:
+            line = str(dev_data[0][i]) + "\t" + dev_data[1][i] + "\t" + modelForBasicAnalysis(dev_data[1][i]) + "\n"
+            results_file.write(line)
 
 
 
@@ -131,5 +157,4 @@ if  __name__ == "__main__":
 
     trainForBasicAnalysis()
 
-
-    # train()
+    testForBasicAnalysis()
