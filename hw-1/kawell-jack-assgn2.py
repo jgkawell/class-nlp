@@ -6,7 +6,9 @@ import random
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
 _part_types = []
 _word_types = []
-_pos_counts = []
+_words_observation_prob = [[]]
+_parts_transition_prob = [[]]
+
 
 _full_file_name = "hw-1/berp-POS-training.txt"
 _train_file_name = "hw-1/train.txt"
@@ -54,31 +56,78 @@ def createTrainingAndDevData():
         for line in sentence:
             dev_file.write(line)
 
-
-
 # find tokens for both words and pos
-def findTokens():
+def buildProbMatrices():
     global _train_data
     global _word_types
     global _part_types
+    global _words_observation_prob
+    global _parts_transition_prob
 
     _train_data = getLists(_train_file_name)
 
-    # get the list of word types
+    # get the list of word types and tokens
     word_counter = Counter(_train_data[1])
     _word_types = list(word_counter.keys())
+    num_word_types = len(_word_types) + 1 # +1 to account for <unk>, unknown words that will appear in testing
 
-    #  get the list of unique parts of speach
+    #  get the list of pos types and tokens
     part_counter = Counter(_train_data[2])
     _part_types = list(part_counter.keys())
+    num_part_types = len(_part_types) + 1 # +1 to account for the beginning sentence marker
 
-    _word_tokens = []
-    for word in _word_types:
-        _word_tokens.append(word_counter.get(word))
+    # find the transition probability for pos given previous pos
+    _parts_transition_prob = findPartsTransitionProb(num_part_types)
 
-    _part_tokens = []
-    for part in _part_types:
-        _part_tokens.append(part_counter.get(part))
+    # find the observation likelihood for the pos given words
+    _words_observation_prob = findWordsObservationProb(num_word_types, num_part_types)
+
+# find the transition probabilities for the pos
+def findPartsTransitionProb(num_part_types):
+    parts_transition_count = np.zeros((num_part_types, num_part_types))
+    for i in range(0, len(_train_data[1])):
+        prev_part = "?"
+        cur_part = _part_types.index(_train_data[2][i])
+        
+        #  for the first position, make the previous pos the beginning of the sentence marker
+        if i == 0:
+            prev_part = _part_types.index("<s>")
+        else:
+            prev_part = _part_types.index(_train_data[2][i - 1])
+
+        # increment the count for the transition count
+        parts_transition_count[cur_part][prev_part] += 1
+
+    # find the transition probabilities for the pos
+    parts_transition_prob = np.zeros((num_part_types, num_part_types))
+    for i in range(0, num_part_types):
+        for j in range(0, num_part_types):
+            parts_transition_prob[i][j] = parts_transition_count[i][j] / (num_part_types * num_part_types)
+
+    return parts_transition_prob
+
+# find the observation probability for the words
+def findWordsObservationProb(num_word_types, num_part_types):
+    # iterate through training data and count the words with corresponding pos
+    word_observation_count = np.zeros((num_word_types, num_part_types))
+    for i in range(0, len(_train_data[1])):
+        # pull out the current word and pos
+        cur_word = _word_types.index(_train_data[1][i])
+        cur_part = _part_types.index(_train_data[2][i])
+        
+        if cur_part == _part_types.index("<s>"):
+            continue
+
+        # increment the count for the observation
+        word_observation_count[cur_word][cur_part] += 1
+
+    # find the observation probability from the counts
+    word_observation_prob = np.zeros((num_word_types, num_part_types))
+    for i in range(0, num_word_types):
+        for j in range(0, num_part_types):
+            word_observation_prob[i][j] = word_observation_count[i][j] / (num_word_types * num_part_types)
+
+    return word_observation_prob
 
 # pulls out the nums, words, and pos data as lists
 def getLists(file_name):
@@ -105,46 +154,12 @@ def getLists(file_name):
         else:
             nums.append(0)
             words.append(0)
-            parts.append(0)
+            parts.append("<s>")
 
     return (nums, words, parts)
 
-
-# basic "most frequent tag" system to just make a start on the project
-def trainForBasicAnalysis():
-    global _pos_counts
-
-    # count the pos tags associated with words
-    _pos_counts = np.zeros((len(_word_types), len(_part_types)))
-    for i in range(0, len(_train_data[1])):
-        word = _train_data[1][i]
-        part = _train_data[2][i]
-
-        word_index = _word_types.index(word)
-        part_index = _part_types.index(part)
-
-        _pos_counts[word_index][part_index] += 1
-
-# basic model that uses the word counts to predict pos
-def modelForBasicAnalysis(word):
-
-    # if the word exists in the training data find the most common pos
-    # if not, an exception will be thrown and we'll guess that it's a noun
-    pos = "?"
-    unique = _word_types
-    try:
-        word_index = unique.index(word)
-        part_index = np.argmax(_pos_counts[word_index])
-        pos = _part_types[part_index]
-    except:
-        pos = "NN"
-
-    return pos
-
-
-
 #  test using the basic "most frequent tag" technique
-def testForBasicAnalysis():
+def generateOutput():
 
     # create results file
     results_file = open(_results_file_name, "w")
@@ -157,17 +172,29 @@ def testForBasicAnalysis():
         if dev_data[0][i] == 0:
             results_file.write("\n")
         else:
-            line = str(dev_data[0][i]) + "\t" + dev_data[1][i] + "\t" + modelForBasicAnalysis(dev_data[1][i]) + "\n"
+            line = "test"#str(dev_data[0][i]) + "\t" + dev_data[1][i] + "\t" + predict(str(dev_data[1][i])) + "\n"
             results_file.write(line)
 
+# implements the viterbi algorithm
+def viterbi():
+    global _word_types
+    global _part_types
+    global _probabilities
+    global _train_data
+    global _parts_transition_prob
+    global _words_observation_prob
 
+    print("Not implemented")
+
+def predict(word):
+    print("Not implemented")
 
 if  __name__ == "__main__":
 
     createTrainingAndDevData()
 
-    findTokens()
+    buildProbMatrices()
 
-    trainForBasicAnalysis()
+    viterbi()
 
-    testForBasicAnalysis()
+    generateOutput()
