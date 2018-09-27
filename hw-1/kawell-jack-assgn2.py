@@ -4,8 +4,8 @@ import random
 
 # initialize the data field variables
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
-_unique_parts = []
-_unique_words = []
+_part_types = []
+_word_types = []
 _pos_counts = []
 
 _full_file_name = "hw-1/berp-POS-training.txt"
@@ -14,8 +14,8 @@ _dev_file_name = "hw-1/dev.txt"
 _results_file_name = "hw-1/results.txt"
 
         
-# preprocess the data to find unique and separate training from dev data
-def preprocessForBasicAnalysis():
+# preprocess the data to create a training and dev set
+def createTrainingAndDevData():
 
     # read in the training data
     full_file = open(_full_file_name, "r")
@@ -55,21 +55,23 @@ def preprocessForBasicAnalysis():
             dev_file.write(line)
 
 
-# find stats for basic analysis
-def findStatsForBasicAnalysis():
+
+# find tokens for both words and pos
+def findTokens():
     global _train_data
-    global _unique_words
-    global _unique_parts
+    global _word_types
+    global _part_types
 
-    _train_data = getFileData(_train_file_name)
+    _train_data = getLists(_train_file_name)
 
-    # get the list of unique words
-    _unique_words = list(Counter(_train_data[1]).keys())
+    # get the list of word types
+    _word_types = list(Counter(_train_data[1]).keys())
 
     #  get the list of unique parts of speach
-    _unique_parts = list(Counter(_train_data[2]).keys())
+    _part_types = list(Counter(_train_data[2]).keys())
 
-def getFileData(file_name):
+# pulls out the nums, words, and pos data as lists
+def getLists(file_name):
 
     # read in training data
     lines = open(file_name, "r")
@@ -103,13 +105,13 @@ def trainForBasicAnalysis():
     global _pos_counts
 
     # count the pos tags associated with words
-    _pos_counts = np.zeros((len(_unique_words), len(_unique_parts)))
+    _pos_counts = np.zeros((len(_word_types), len(_part_types)))
     for i in range(0, len(_train_data[1])):
         word = _train_data[1][i]
         part = _train_data[2][i]
 
-        word_index = _unique_words.index(word)
-        part_index = _unique_parts.index(part)
+        word_index = _word_types.index(word)
+        part_index = _part_types.index(part)
 
         _pos_counts[word_index][part_index] += 1
 
@@ -119,11 +121,11 @@ def modelForBasicAnalysis(word):
     # if the word exists in the training data find the most common pos
     # if not, an exception will be thrown and we'll guess that it's a noun
     pos = "?"
-    unique = _unique_words
+    unique = _word_types
     try:
         word_index = unique.index(word)
         part_index = np.argmax(_pos_counts[word_index])
-        pos = _unique_parts[part_index]
+        pos = _part_types[part_index]
     except:
         pos = "NN"
 
@@ -138,7 +140,7 @@ def testForBasicAnalysis():
     results_file = open(_results_file_name, "w")
     
     # retrieve data to run through model
-    dev_data = getFileData(_dev_file_name)
+    dev_data = getLists(_dev_file_name)
 
     # write predictions to test file
     for i in range(0, len(dev_data[1])):
@@ -151,9 +153,10 @@ def testForBasicAnalysis():
 
 
 if  __name__ == "__main__":
-    preprocessForBasicAnalysis()
 
-    findStatsForBasicAnalysis()
+    createTrainingAndDevData()
+
+    findTokens()
 
     trainForBasicAnalysis()
 
