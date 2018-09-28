@@ -6,8 +6,8 @@ import random
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
 _part_types = []
 _word_types = []
-_words_observation_prob = [[]]
-_parts_transition_prob = [[]]
+_observation_prob = [[]]
+_transition_prob = [[]]
 
 
 _full_file_name = "hw-1/berp-POS-training.txt"
@@ -38,7 +38,7 @@ def createTrainingAndDevData():
             temp_sentence = []
         
     # get a random sampling of sentence indices
-    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / 2))
+    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / 10))
 
     # pull out the sentences into train and dev sets
     dev_sentences = []
@@ -57,70 +57,6 @@ def createTrainingAndDevData():
     for sentence in dev_sentences:
         for line in sentence:
             dev_file.write(line)
-
-# find tokens for both words and pos
-def buildProbMatrices():
-    global _train_data
-    global _word_types
-    global _part_types
-    global _words_observation_prob
-    global _parts_transition_prob
-
-    _train_data = getLists(_train_file_name)
-
-    # get the list of word types and tokens
-    word_counter = Counter(_train_data[1])
-    _word_types = list(word_counter.keys())
-    num_word_types = len(_word_types)
-
-    #  get the list of pos types and tokens
-    part_counter = Counter(_train_data[2])
-    _part_types = list(part_counter.keys())
-    num_part_types = len(_part_types)
-
-    parts_transition_count = np.zeros((num_part_types, num_part_types))
-    for row in range(0, len(_train_data[1])):
-        prev = "?"
-        cur = _part_types.index(_train_data[2][row])
-        
-        #  for the first position, make the previous pos the beginning of the sentence marker
-        if row == 0:
-            prev = _part_types.index(_beginning_of_sentence)
-        else:
-            prev = _part_types.index(_train_data[2][row - 1])
-
-        # increment the count for the transition count
-        parts_transition_count[cur][prev] += 1
-
-    # find the transition probability for pos given previous pos
-    _parts_transition_prob = buildProbMatrix(num_part_types, num_part_types, parts_transition_count)
-
-    # iterate through training data and count the words with corresponding pos
-    word_observation_count = np.zeros((num_part_types, num_word_types))
-    for i in range(0, len(_train_data[1])):
-        # pull out the current word and pos
-        cur_word = _word_types.index(_train_data[1][i])
-        cur_part = _part_types.index(_train_data[2][i])
-
-        # increment the count for the observation
-        word_observation_count[cur_part][cur_word] += 1
-
-    # find the observation likelihood for the pos given words
-    _words_observation_prob = buildProbMatrix(num_part_types, num_word_types, word_observation_count)
-
-def buildProbMatrix(num_rows, num_cols, count_matrix):
-    # find the transition probabilities for the pos
-    prob_matrix = np.zeros((num_rows, num_cols))
-    row_sums = np.zeros(num_rows)
-    for row in range(0, num_rows):
-        for col in range(0, num_cols): 
-            row_sums[row] += count_matrix[row][col]
-
-    for row in range(0, num_rows):
-        for col in range(0, num_cols):
-            prob_matrix[row][col] = count_matrix[row][col] / row_sums[row]
-
-    return prob_matrix
 
 # pulls out the nums, words, and pos data as lists
 def getLists(file_name):
@@ -151,6 +87,83 @@ def getLists(file_name):
 
     return (nums, words, parts)
 
+# find tokens for both words and pos
+def calcProbData():
+    global _train_data
+    global _word_types
+    global _part_types
+    global _observation_prob
+    global _transition_prob
+
+    _train_data = getLists(_train_file_name)
+
+    # get the list of word types and tokens
+    word_counter = Counter(_train_data[1])
+    _word_types = list(word_counter.keys())
+    num_word_types = len(_word_types)
+
+    #  get the list of pos types and tokens
+    part_counter = Counter(_train_data[2])
+    _part_types = list(part_counter.keys())
+    num_part_types = len(_part_types)
+
+    # iterate through training data and count the transitions for pos
+    parts_transition_count = buildCountMatrix(num_part_types, num_part_types, count_type=1)
+
+    # find the transition probability for pos given previous pos
+    _transition_prob = buildProbMatrix(num_part_types, num_part_types, parts_transition_count)
+
+    # iterate through training data and count the words with corresponding pos
+    word_observation_count = buildCountMatrix(num_part_types, num_word_types, count_type=2)
+
+    # find the observation likelihood for the pos given words
+    _observation_prob = buildProbMatrix(num_part_types, num_word_types, word_observation_count)
+
+# build the count matrices needed to build the prob matrices
+def buildCountMatrix(num_rows, num_cols, count_type):
+    
+    count_matrix = np.zeros((num_rows, num_cols))
+    if count_type == 1:
+            # iterate through training data and count the transitions for pos
+            for row in range(0, len(_train_data[1])):
+                prev = "?"
+                cur = _part_types.index(_train_data[2][row])
+                
+                #  for the first position, make the previous pos the beginning of the sentence marker
+                if row == 0:
+                    prev = _part_types.index(_beginning_of_sentence)
+                else:
+                    prev = _part_types.index(_train_data[2][row - 1])
+
+                # increment the count for the transition count
+                count_matrix[cur][prev] += 1
+    elif count_type == 2:
+            # iterate through training data and count the words with corresponding pos
+            for i in range(0, len(_train_data[1])):
+                # pull out the current word and pos
+                cur_word = _word_types.index(_train_data[1][i])
+                cur_part = _part_types.index(_train_data[2][i])
+
+                # increment the count for the observation
+                count_matrix[cur_part][cur_word] += 1
+
+    return count_matrix
+
+#  build the prob matrices (both transition and emission)
+def buildProbMatrix(num_rows, num_cols, count_matrix):
+    # find the transition probabilities for the pos
+    prob_matrix = np.zeros((num_rows, num_cols))
+    row_sums = np.zeros(num_rows)
+    for row in range(0, num_rows):
+        for col in range(0, num_cols): 
+            row_sums[row] += count_matrix[row][col]
+
+    for row in range(0, num_rows):
+        for col in range(0, num_cols):
+            prob_matrix[row][col] = count_matrix[row][col] / row_sums[row]
+
+    return prob_matrix
+
 #  test using the basic "most frequent tag" technique
 def generateOutput():
 
@@ -174,13 +187,13 @@ def viterbi():
     global _part_types
     global _probabilities
     global _train_data
-    global _parts_transition_prob
-    global _words_observation_prob
+    global _transition_prob
+    global _observation_prob
 
     observtions = _word_types
     states = _part_types
-    transition_prob = _parts_transition_prob
-    observation_prob = _words_observation_prob
+    transition_prob = _transition_prob
+    observation_prob = _observation_prob
 
     for i in range(0, len(observation_prob)):
         total = 0
@@ -203,7 +216,7 @@ if  __name__ == "__main__":
 
     createTrainingAndDevData()
 
-    buildProbMatrices()
+    calcProbData()
 
     viterbi()
 
