@@ -4,18 +4,19 @@ import random
 
 # initialize the data field variables
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
-_part_types = []
-_word_types = []
+_state_space = []
+_observation_space = []
 _observation_prob = [[]]
 _transition_prob = [[]]
 
 
-_full_file_name = "hw-1/berp-POS-training.txt"
-_train_file_name = "hw-1/train.txt"
-_dev_file_name = "hw-1/dev.txt"
-_results_file_name = "hw-1/results.txt"
+_full_file_name = "berp-POS-training.txt"
+_train_file_name = "train.txt"
+_dev_file_name = "dev.txt"
+_results_file_name = "results.txt"
 _blank_line = "blank line"
 _beginning_of_sentence = "<s>"
+_unknown_word = "<UNK>"
 
         
 # preprocess the data to create a training and dev set
@@ -87,11 +88,11 @@ def getLists(file_name):
 
     return (nums, words, parts)
 
-# find tokens for both words and pos
-def calcProbData():
+# calc all needed probs for hmm/viterbi
+def train():
     global _train_data
-    global _word_types
-    global _part_types
+    global _observation_space
+    global _state_space
     global _observation_prob
     global _transition_prob
 
@@ -99,13 +100,14 @@ def calcProbData():
 
     # get the list of word types and tokens
     word_counter = Counter(_train_data[1])
-    _word_types = list(word_counter.keys())
-    num_word_types = len(_word_types)
+    _observation_space = list(word_counter.keys())
+    _observation_space.append(_unknown_word)
+    num_word_types = len(_observation_space)
 
     #  get the list of pos types and tokens
     part_counter = Counter(_train_data[2])
-    _part_types = list(part_counter.keys())
-    num_part_types = len(_part_types)
+    _state_space = list(part_counter.keys())
+    num_part_types = len(_state_space)
 
     # iterate through training data and count the transitions for pos
     parts_transition_count = buildCountMatrix(num_part_types, num_part_types, count_type=1)
@@ -121,19 +123,19 @@ def calcProbData():
 
 # build the count matrices needed to build the prob matrices
 def buildCountMatrix(num_rows, num_cols, count_type):
-    
-    count_matrix = np.zeros((num_rows, num_cols))
+    # initialize as ones for laplace smoothing
+    count_matrix = np.ones((num_rows, num_cols))
     if count_type == 1:
             # iterate through training data and count the transitions for pos
             for row in range(0, len(_train_data[1])):
                 prev = "?"
-                cur = _part_types.index(_train_data[2][row])
+                cur = _state_space.index(_train_data[2][row])
                 
                 #  for the first position, make the previous pos the beginning of the sentence marker
                 if row == 0:
-                    prev = _part_types.index(_beginning_of_sentence)
+                    prev = _state_space.index(_beginning_of_sentence)
                 else:
-                    prev = _part_types.index(_train_data[2][row - 1])
+                    prev = _state_space.index(_train_data[2][row - 1])
 
                 # increment the count for the transition count
                 count_matrix[cur][prev] += 1
@@ -141,8 +143,8 @@ def buildCountMatrix(num_rows, num_cols, count_type):
             # iterate through training data and count the words with corresponding pos
             for i in range(0, len(_train_data[1])):
                 # pull out the current word and pos
-                cur_word = _word_types.index(_train_data[1][i])
-                cur_part = _part_types.index(_train_data[2][i])
+                cur_word = _observation_space.index(_train_data[1][i])
+                cur_part = _state_space.index(_train_data[2][i])
 
                 # increment the count for the observation
                 count_matrix[cur_part][cur_word] += 1
@@ -160,64 +162,97 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
 
     for row in range(0, num_rows):
         for col in range(0, num_cols):
-            prob_matrix[row][col] = count_matrix[row][col] / row_sums[row]
+            # add num_rows to denominator for laplace smoothing
+            prob_matrix[row][col] = count_matrix[row][col] / (row_sums[row] + num_rows)
 
     return prob_matrix
 
 #  test using the basic "most frequent tag" technique
-def generateOutput():
+def test():
 
     # create results file
     results_file = open(_results_file_name, "w")
-    
+
     # retrieve data to run through model
     dev_data = getLists(_dev_file_name)
 
     # write predictions to test file
+    sentence_list = []
+    sentence = []
     for i in range(0, len(dev_data[1])):
-        if dev_data[0][i] == 0:
-            results_file.write("\n")
+        cur_word = dev_data[1][i]
+
+        # if we're at the beginning of a new sentence, add to list and clear
+        if cur_word == _blank_line:
+            # add to sentence list
+            sentence_list.append(sentence.copy())
+            # clear the sentence for a new sentence
+            sentence.clear()
         else:
-            line = "test"#str(dev_data[0][i]) + "\t" + dev_data[1][i] + "\t" + predict(str(dev_data[1][i])) + "\n"
-            results_file.write(line)
+            sentence.append(cur_word)
+    
+    position = 0
+    for sentence in sentence_list:
+        print(sentence)
+        observations = []
+        for word in sentence:
+            try:
+                observations.append(_observation_space.index(word))
+            except:
+                observations.append(_observation_space.index(_unknown_word))
+
+        best_path, best_prob = viterbi(len(_state_space), _transition_prob, _observation_prob, observations)
+
+        for i in best_path:
+            num = str(dev_data[0][position])
+            word = str(dev_data[1][position])
+            pos = _state_space[i]
+
+            results_file.write(num + "\t" + word + "\t" + pos + "\n")
+
+            position += 1
+
+
+        results_file.write("\n")
+        position += 1
 
 # implements the viterbi algorithm
-def viterbi():
-    global _word_types
-    global _part_types
-    global _probabilities
-    global _train_data
-    global _transition_prob
-    global _observation_prob
+def viterbi(num_states, transition, emission, observations):
 
-    observtions = _word_types
-    states = _part_types
-    transition_prob = _transition_prob
-    observation_prob = _observation_prob
+    num_observations = len(observations)
+    log_transition = np.log(transition)
+    log_emission = np.log(emission)
+    log_probability = np.zeros(num_states)
 
-    for i in range(0, len(observation_prob)):
-        total = 0
-        for j in range(0, len(observation_prob[0])):
-            total += observation_prob[i][j]
+    path_prob = np.zeros((num_observations, num_states))
+    back_pointer = np.zeros((num_observations, num_states))
 
-        print("POS: " + str(_part_types[i]) + " Sum: " + str(total))
+    for s in range(0, num_states):
+        path_prob[0,s] = log_probability[s] + log_emission[s][0]
 
-    
+    for o in range(1, num_observations):
+        for s in range(0, num_states):
+            path_prob[o,s] = np.max(path_prob[o-1] + log_transition[:,s]) + log_emission[s,observations[o]]
+            # don't need the emission value for back pointer
+            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[:,s])
 
+    best_prob = np.max(path_prob[-1])
+    best_pointer = np.argmax(path_prob[-1])
 
-    for s in states:
-        x = 1
+    best_path = np.zeros(num_observations, dtype=np.int32)
+    best_path[-1] = best_pointer
+    for p in range(num_observations - 2, -1, -1):
+        best_path[p] = back_pointer[p+1, best_path[p+1]]
+        
+        if p == num_observations - 2:
+            print(_state_space[best_path[p]])
 
-
-def predict(word):
-    print("Not implemented")
+    return (best_path, best_prob)
 
 if  __name__ == "__main__":
 
     createTrainingAndDevData()
 
-    calcProbData()
+    train()
 
-    viterbi()
-
-    generateOutput()
+    test()
