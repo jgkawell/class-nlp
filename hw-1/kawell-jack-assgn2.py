@@ -6,6 +6,7 @@ import random
 _train_data = ([], [], []) # 0=nums, 1=words, 2=parts
 _state_space = []
 _observation_space = []
+_initial_prob = []
 _observation_prob = [[]]
 _transition_prob = [[]]
 
@@ -14,8 +15,6 @@ _full_file_name = "berp-POS-training.txt"
 _train_file_name = "train.txt"
 _dev_file_name = "dev.txt"
 _results_file_name = "results.txt"
-_blank_line = "blank line"
-_beginning_of_sentence = "<s>"
 _unknown_word = "<UNK>"
 
         
@@ -81,18 +80,42 @@ def getLists(file_name):
             nums.append(fields[0])
             words.append(fields[1])
             parts.append(fields[2])
-        else:
-            nums.append(0)
-            words.append(_blank_line)
-            parts.append(_beginning_of_sentence)
 
     return (nums, words, parts)
+
+# pulls out words and pos in sentences
+def getSentences(file_name):
+
+    # read in training data
+    lines = open(file_name, "r")
+
+    num_sentences = 0    
+    sentence_list = []
+    sentence = []
+    for line in lines:
+        # increment the count for the total length of the training data
+        num_sentences += 1
+
+        #  pull out the individual columns of the data
+        fields = line.rstrip("\n\r").split("\t")
+
+        #  if the data is not a blank line, add the data sentence
+        # else, add sentence to list and clear for new sentence
+        if len(fields) > 1:
+            data = (fields[1], fields[2])
+            sentence.append(data)
+        else:
+            sentence_list.append(sentence.copy())
+            sentence.clear()
+
+    return sentence_list
 
 # calc all needed probs for hmm/viterbi
 def train():
     global _train_data
     global _observation_space
     global _state_space
+    global _initial_prob
     global _observation_prob
     global _transition_prob
 
@@ -108,6 +131,14 @@ def train():
     part_counter = Counter(_train_data[2])
     _state_space = list(part_counter.keys())
     num_part_types = len(_state_space)
+
+    # calculate the initial probabilities
+    num_part_tokens = 0
+    for part in _state_space:
+        num_part_tokens += part_counter.get(part)
+
+    for part in _state_space:
+        _initial_prob.append(part_counter.get(part) / num_part_tokens)
 
     # iterate through training data and count the transitions for pos
     parts_transition_count = buildCountMatrix(num_part_types, num_part_types, count_type=1)
@@ -131,11 +162,11 @@ def buildCountMatrix(num_rows, num_cols, count_type):
                 prev = "?"
                 cur = _state_space.index(_train_data[2][row])
                 
-                #  for the first position, make the previous pos the beginning of the sentence marker
-                if row == 0:
-                    prev = _state_space.index(_beginning_of_sentence)
-                else:
-                    prev = _state_space.index(_train_data[2][row - 1])
+                # #  for the first position, make the previous pos the beginning of the sentence marker
+                # if row == 0:
+                #     prev = _state_space.index(_beginning_of_sentence)
+                # else:
+                prev = _state_space.index(_train_data[2][row - 1])
 
                 # increment the count for the transition count
                 count_matrix[cur][prev] += 1
@@ -175,7 +206,7 @@ def test():
 
     # retrieve data to run through model
     dev_data = getLists(_dev_file_name)
-
+            
     # write predictions to test file
     sentence_list = []
     sentence = []
@@ -183,17 +214,18 @@ def test():
         cur_word = dev_data[1][i]
 
         # if we're at the beginning of a new sentence, add to list and clear
-        if cur_word == _blank_line:
+        if cur_word == ".":
+            # add the word to the sentence
+            sentence.append(cur_word)
             # add to sentence list
             sentence_list.append(sentence.copy())
             # clear the sentence for a new sentence
             sentence.clear()
         else:
             sentence.append(cur_word)
-    
+
     position = 0
     for sentence in sentence_list:
-        print(sentence)
         observations = []
         for word in sentence:
             try:
@@ -201,12 +233,12 @@ def test():
             except:
                 observations.append(_observation_space.index(_unknown_word))
 
-        best_path, best_prob = viterbi(len(_state_space), _transition_prob, _observation_prob, observations)
+        best_path, best_prob = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
 
-        for i in best_path:
+        for i in range(0, len(best_path)):
             num = str(dev_data[0][position])
             word = str(dev_data[1][position])
-            pos = _state_space[i]
+            pos = _state_space[best_path[i]]
 
             results_file.write(num + "\t" + word + "\t" + pos + "\n")
 
@@ -214,27 +246,26 @@ def test():
 
 
         results_file.write("\n")
-        position += 1
 
 # implements the viterbi algorithm
-def viterbi(num_states, transition, emission, observations):
+def viterbi(num_states, transition, emission, prob, observations):
 
     num_observations = len(observations)
     log_transition = np.log(transition)
     log_emission = np.log(emission)
-    log_probability = np.zeros(num_states)
+    log_probability = np.log(prob)
 
     path_prob = np.zeros((num_observations, num_states))
     back_pointer = np.zeros((num_observations, num_states))
 
     for s in range(0, num_states):
-        path_prob[0,s] = log_probability[s] + log_emission[s][0]
+        path_prob[0,s] = log_probability[s] + log_emission[s,observations[0]]
 
     for o in range(1, num_observations):
         for s in range(0, num_states):
             path_prob[o,s] = np.max(path_prob[o-1] + log_transition[:,s]) + log_emission[s,observations[o]]
             # don't need the emission value for back pointer
-            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[:,s])
+            back_pointer[o,s] = np.argmax(path_prob[o-1] + log_transition[:,s])
 
     best_prob = np.max(path_prob[-1])
     best_pointer = np.argmax(path_prob[-1])
@@ -244,8 +275,8 @@ def viterbi(num_states, transition, emission, observations):
     for p in range(num_observations - 2, -1, -1):
         best_path[p] = back_pointer[p+1, best_path[p+1]]
         
-        if p == num_observations - 2:
-            print(_state_space[best_path[p]])
+        # if p == num_observations - 2:
+        #     print(_state_space[best_path[p]])
 
     return (best_path, best_prob)
 
