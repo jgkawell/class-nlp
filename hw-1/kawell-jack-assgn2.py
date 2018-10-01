@@ -14,6 +14,7 @@ _transition_prob = [[]]
 _full_file_name = "berp-POS-training.txt"
 _train_file_name = "train.txt"
 _dev_file_name = "dev.txt"
+_test_file_name = "test.txt"
 _results_file_name = "results.txt"
 _unknown_word = "<UNK>"
 
@@ -59,7 +60,7 @@ def createTrainingAndDevData():
             dev_file.write(line)
 
 # pulls out the nums, words, and pos data as lists
-def getLists(file_name):
+def getLists(file_name, dev = True):
 
     # read in training data
     lines = open(file_name, "r")
@@ -79,36 +80,10 @@ def getLists(file_name):
         if len(fields) > 1:
             nums.append(fields[0])
             words.append(fields[1])
-            parts.append(fields[2])
+            if dev:
+                parts.append(fields[2])
 
     return (nums, words, parts)
-
-# pulls out words and pos in sentences
-def getSentences(file_name):
-
-    # read in training data
-    lines = open(file_name, "r")
-
-    num_sentences = 0    
-    sentence_list = []
-    sentence = []
-    for line in lines:
-        # increment the count for the total length of the training data
-        num_sentences += 1
-
-        #  pull out the individual columns of the data
-        fields = line.rstrip("\n\r").split("\t")
-
-        #  if the data is not a blank line, add the data sentence
-        # else, add sentence to list and clear for new sentence
-        if len(fields) > 1:
-            data = (fields[1], fields[2])
-            sentence.append(data)
-        else:
-            sentence_list.append(sentence.copy())
-            sentence.clear()
-
-    return sentence_list
 
 # calc all needed probs for hmm/viterbi
 def train():
@@ -124,6 +99,16 @@ def train():
     # get the list of word types and tokens
     word_counter = Counter(_train_data[1])
     _observation_space = list(word_counter.keys())
+
+    # remove words occuring once and replace them with <UNK>
+    words_to_remove = []
+    for word, count in word_counter.items():
+        if count == 1:
+            words_to_remove.append(word)
+
+    for word in words_to_remove:
+        _observation_space.remove(word)
+
     _observation_space.append(_unknown_word)
     num_word_types = len(_observation_space)
 
@@ -146,6 +131,11 @@ def train():
     # find the transition probability for pos given previous pos
     _transition_prob = buildProbMatrix(num_part_types, num_part_types, parts_transition_count)
 
+    # calculate the initial probabilities
+    # period_index = _state_space.index(".")
+    # for s in range(0, len(_state_space)):
+    #     _initial_prob.append(_transition_prob[period_index][s])
+
     # iterate through training data and count the words with corresponding pos
     word_observation_count = buildCountMatrix(num_part_types, num_word_types, count_type=2)
 
@@ -161,11 +151,6 @@ def buildCountMatrix(num_rows, num_cols, count_type):
             for row in range(0, len(_train_data[1])):
                 prev = "?"
                 cur = _state_space.index(_train_data[2][row])
-                
-                # #  for the first position, make the previous pos the beginning of the sentence marker
-                # if row == 0:
-                #     prev = _state_space.index(_beginning_of_sentence)
-                # else:
                 prev = _state_space.index(_train_data[2][row - 1])
 
                 # increment the count for the transition count
@@ -174,7 +159,11 @@ def buildCountMatrix(num_rows, num_cols, count_type):
             # iterate through training data and count the words with corresponding pos
             for i in range(0, len(_train_data[1])):
                 # pull out the current word and pos
-                cur_word = _observation_space.index(_train_data[1][i])
+                try:
+                    cur_word = _observation_space.index(_train_data[1][i])
+                except:
+                    cur_word = _observation_space.index(_unknown_word)
+
                 cur_part = _state_space.index(_train_data[2][i])
 
                 # increment the count for the observation
@@ -205,7 +194,7 @@ def test():
     results_file = open(_results_file_name, "w")
 
     # retrieve data to run through model
-    dev_data = getLists(_dev_file_name)
+    dev_data = getLists(_dev_file_name, dev=False)
             
     # write predictions to test file
     sentence_list = []
