@@ -3,24 +3,28 @@ import numpy as np
 import random
 
 # initialize the data field variables
-_train_data = ([], [], []) # 0=nums, 1=words, 2=parts
+_train_data = []
 _state_space = []
 _observation_space = []
 _initial_prob = []
 _observation_prob = [[]]
 _transition_prob = [[]]
 
-
+# global string values for files and markers
 _full_file_name = "berp-POS-training.txt"
 _train_file_name = "train.txt"
 _dev_file_name = "dev.txt"
 _test_file_name = "test.txt"
-_results_file_name = "results.txt"
-_unknown_word = "<UNK>"
+_dev_results_file_name = "dev-results.txt"
+_test_results_file_name = "test-results.txt"
+_unknown_word_marker = "<UNK>"
+_sentence_marker = "<s>"
 
+# global int values for algorithm params
+_dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
-def createTrainingAndDevData():
+def preprocess():
 
     # read in the training data
     full_file = open(_full_file_name, "r")
@@ -39,7 +43,7 @@ def createTrainingAndDevData():
             temp_sentence = []
         
     # get a random sampling of sentence indices
-    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / 10))
+    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / _dev_partition_ratio))
 
     # pull out the sentences into train and dev sets
     dev_sentences = []
@@ -59,127 +63,147 @@ def createTrainingAndDevData():
         for line in sentence:
             dev_file.write(line)
 
-# pulls out the nums, words, and pos data as lists
-def getLists(file_name, dev = True):
-
-    # read in training data
-    lines = open(file_name, "r")
-
-    file_length = 0
-    nums = []
-    words = []
-    parts = []
-    for line in lines:
-        # increment the count for the total length of the training data
-        file_length += 1
-
-        #  pull out the individual collumns of the data
-        fields = line.rstrip("\n\r").split("\t")
-
-        #  if the data is not a blank line, add the data to the lists
-        if len(fields) > 1:
-            nums.append(fields[0])
-            words.append(fields[1])
-            if dev:
-                parts.append(fields[2])
-
-    return (nums, words, parts)
-
-# calc all needed probs for hmm/viterbi
+# calculate all needed probs and counts for hmm/viterbi
 def train():
     global _train_data
-    global _observation_space
-    global _state_space
     global _initial_prob
     global _observation_prob
     global _transition_prob
 
-    _train_data = getLists(_train_file_name)
+    # get the list of sentences with words and pos for training
+    _train_data = getSentences(_train_file_name)
 
-    # get the list of word types and tokens
-    word_counter = Counter(_train_data[1])
-    _observation_space = list(word_counter.keys())
-
-    # remove words occuring once and replace them with <UNK>
-    words_to_remove = []
-    for word, count in word_counter.items():
-        if count == 1:
-            words_to_remove.append(word)
-
-    for word in words_to_remove:
-        _observation_space.remove(word)
-
-    _observation_space.append(_unknown_word)
-    num_word_types = len(_observation_space)
-
-    #  get the list of pos types and tokens
-    part_counter = Counter(_train_data[2])
-    _state_space = list(part_counter.keys())
-    num_part_types = len(_state_space)
-
-    # calculate the initial probabilities
-    num_part_tokens = 0
-    for part in _state_space:
-        num_part_tokens += part_counter.get(part)
-
-    for part in _state_space:
-        _initial_prob.append(part_counter.get(part) / num_part_tokens)
+    len_observation_space, len_state_space = buildSpaces()
 
     # iterate through training data and count the transitions for pos
-    parts_transition_count = buildCountMatrix(num_part_types, num_part_types, count_type=1)
-
-    # find the transition probability for pos given previous pos
-    _transition_prob = buildProbMatrix(num_part_types, num_part_types, parts_transition_count)
-
-    # calculate the initial probabilities
-    # period_index = _state_space.index(".")
-    # for s in range(0, len(_state_space)):
-    #     _initial_prob.append(_transition_prob[period_index][s])
-
-    # iterate through training data and count the words with corresponding pos
-    word_observation_count = buildCountMatrix(num_part_types, num_word_types, count_type=2)
+    transition_count_matrix, observation_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
 
     # find the observation likelihood for the pos given words
-    _observation_prob = buildProbMatrix(num_part_types, num_word_types, word_observation_count)
+    _observation_prob = buildProbMatrix(len_state_space, len_observation_space, observation_count_matrix)
+
+    # find the transition probability for pos given previous pos
+    _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
+
+    # calculate the initial probabilities
+    sentence_beginning_index = _state_space.index(_sentence_marker)
+    for s in range(0, len(_state_space)):
+        _initial_prob.append(_transition_prob[sentence_beginning_index][s])
+
+# pulls out words and pos in sentences
+def getSentences(file_name, dev=True):
+     # read in training data
+    lines = open(file_name, "r")
+    
+    num_sentences = 0    
+    sentence_list = []
+    sentence = []
+    for line in lines:
+        # increment the count for the total length of the training data
+        num_sentences += 1
+         #  pull out the individual columns of the data
+        fields = line.rstrip("\n\r").split("\t")
+        
+        # if the data is not a blank line, add the data sentence
+        # else, add sentence to list and clear for new sentence
+        if len(fields) > 1:
+            # if it is the dev file, we can pull out the pos (2) position for training
+            # else, we only have two positions since there is no pos field
+            if dev:
+                entry = (fields[0], fields[1], fields[2])
+            else:
+                entry = (fields[0], fields[1])
+
+            # add the entry to the sentence
+            sentence.append(entry)
+        else:
+            # add sentence to list and clear
+            sentence_list.append(sentence.copy())
+            sentence.clear()
+
+    return sentence_list
+
+# scan through data and build the observation and state spaces
+def buildSpaces():
+    global _observation_space
+    global _state_space
+    
+    # scan through data and find the spaces along with the single counts in the observation space
+    _observation_space = []
+    single_counts = []
+    _state_space = []
+    for sentence in _train_data:
+        for entry in sentence:
+            # pull out the word and pos
+            word = entry[1]
+            part = entry[2]
+
+            # if word doesn't exist yet in observation space, add it
+            # else, try to remove it from the single counts list
+            if word not in _observation_space:
+                _observation_space.append(word)
+                single_counts.append(word)
+            else:
+                # try to remove word if it is in the single counts list
+                try:
+                    single_counts.remove(word)
+                except:
+                    pass
+
+            # if pos doesn't exist yet in state space, add it
+            if part not in _state_space:
+                _state_space.append(part)
+
+    # remove words with only a single count and replace them with <UNK>
+    for word in single_counts:
+        _observation_space.remove(word)
+
+    # add unknown word marker <UNK>
+    _observation_space.append(_unknown_word_marker)
+
+    #  add sentence marker (<s>)
+    _state_space.append(_sentence_marker)
+
+    return (len(_observation_space), len(_state_space))
 
 # build the count matrices needed to build the prob matrices
-def buildCountMatrix(num_rows, num_cols, count_type):
+def buildCountMatrices(len_state_space, len_observation_space):
+
     # initialize as ones for laplace smoothing
-    count_matrix = np.ones((num_rows, num_cols))
-    if count_type == 1:
-            # iterate through training data and count the transitions for pos
-            for row in range(0, len(_train_data[1])):
-                prev = "?"
-                cur = _state_space.index(_train_data[2][row])
-                prev = _state_space.index(_train_data[2][row - 1])
+    transition_count_matrix = np.ones((len_state_space, len_state_space))
+    emission_count_matrix = np.ones((len_state_space, len_observation_space))
+    
+    # iterate through training data and count the transitions for pos and emissions for words
+    for sentence in _train_data:
+        prev_part = _sentence_marker
+        for entry in sentence:
+            cur_word = entry[1]
+            cur_part = entry[2]
 
-                # increment the count for the transition count
-                count_matrix[cur][prev] += 1
-    elif count_type == 2:
-            # iterate through training data and count the words with corresponding pos
-            for i in range(0, len(_train_data[1])):
-                # pull out the current word and pos
-                try:
-                    cur_word = _observation_space.index(_train_data[1][i])
-                except:
-                    cur_word = _observation_space.index(_unknown_word)
+            # increment the count for the transition count
+            transition_count_matrix[_state_space.index(cur_part)][_state_space.index(prev_part)] += 1
 
-                cur_part = _state_space.index(_train_data[2][i])
+            # set the previous part
+            prev_part = cur_part
 
-                # increment the count for the observation
-                count_matrix[cur_part][cur_word] += 1
+            # increment the count for the emission count
+            try:
+               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
+            except:
+               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
 
-    return count_matrix
+    return (transition_count_matrix, emission_count_matrix)
 
 #  build the prob matrices (both transition and emission)
 def buildProbMatrix(num_rows, num_cols, count_matrix):
-    # find the transition probabilities for the pos
+
+    # scan through and find the sums of the counts on each row (needed for laplace smoothing)
     prob_matrix = np.zeros((num_rows, num_cols))
     row_sums = np.zeros(num_rows)
     for row in range(0, num_rows):
         for col in range(0, num_cols): 
             row_sums[row] += count_matrix[row][col]
 
+    # find the transition probabilities for the pos
     for row in range(0, num_rows):
         for col in range(0, num_cols):
             # add num_rows to denominator for laplace smoothing
@@ -188,91 +212,91 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
     return prob_matrix
 
 #  test using the basic "most frequent tag" technique
-def test():
+def test(run_file_name, results_file_name):
 
     # create results file
-    results_file = open(_results_file_name, "w")
+    results_file = open(results_file_name, "w")
 
     # retrieve data to run through model
-    dev_data = getLists(_dev_file_name, dev=False)
+    data = getSentences(run_file_name, dev=False)
             
-    # write predictions to test file
-    sentence_list = []
-    sentence = []
-    for i in range(0, len(dev_data[1])):
-        cur_word = dev_data[1][i]
-
-        # if we're at the beginning of a new sentence, add to list and clear
-        if cur_word == ".":
-            # add the word to the sentence
-            sentence.append(cur_word)
-            # add to sentence list
-            sentence_list.append(sentence.copy())
-            # clear the sentence for a new sentence
-            sentence.clear()
-        else:
-            sentence.append(cur_word)
-
-    position = 0
-    for sentence in sentence_list:
+    # go through data and run viterbi on each sentence, printing the results
+    for sentence in data:
         observations = []
-        for word in sentence:
+        for entry in sentence:
+            word = entry[1]
+            # try to get the index of the word, if not found, substitute the unknown word marker
             try:
                 observations.append(_observation_space.index(word))
             except:
-                observations.append(_observation_space.index(_unknown_word))
+                observations.append(_observation_space.index(_unknown_word_marker))
 
-        best_path, best_prob = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
+        # run viterbi on each sentence
+        best_path = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
 
-        for i in range(0, len(best_path)):
-            num = str(dev_data[0][position])
-            word = str(dev_data[1][position])
-            pos = _state_space[best_path[i]]
+        # write results to the file
+        count = 0
+        for entry in sentence:
+            # pull out the num, word, and predicted pos
+            num = str(entry[0])
+            word = str(entry[1])
+            pos = _state_space[best_path[count]]
 
+            # write line
             results_file.write(num + "\t" + word + "\t" + pos + "\n")
 
-            position += 1
+            # increment count
+            count += 1
 
-
+        # print line between sentences
         results_file.write("\n")
 
 # implements the viterbi algorithm
 def viterbi(num_states, transition, emission, prob, observations):
 
+    # initialize constants for viterbi
     num_observations = len(observations)
     log_transition = np.log(transition)
     log_emission = np.log(emission)
     log_probability = np.log(prob)
 
+    # initialize tracking matrices for viterbi
     path_prob = np.zeros((num_observations, num_states))
     back_pointer = np.zeros((num_observations, num_states))
 
+    # initialize first column of the path prob matrix (first set of states)
     for s in range(0, num_states):
         path_prob[0,s] = log_probability[s] + log_emission[s,observations[0]]
 
+    # scan through remaining observations and states finding the most probable and saving the backpointer
     for o in range(1, num_observations):
         for s in range(0, num_states):
-            path_prob[o,s] = np.max(path_prob[o-1] + log_transition[:,s]) + log_emission[s,observations[o]]
+            path_prob[o,s] = np.max(path_prob[o-1] + log_transition[s,:]) + log_emission[s,observations[o]]
             # don't need the emission value for back pointer
-            back_pointer[o,s] = np.argmax(path_prob[o-1] + log_transition[:,s])
+            back_pointer[o,s] = np.argmax(path_prob[o-1] + log_transition[s,:])
 
-    best_prob = np.max(path_prob[-1])
+    # pull out the last saved backpointer
     best_pointer = np.argmax(path_prob[-1])
 
+    # find the remaining backpointers from the last saved
     best_path = np.zeros(num_observations, dtype=np.int32)
     best_path[-1] = best_pointer
     for p in range(num_observations - 2, -1, -1):
         best_path[p] = back_pointer[p+1, best_path[p+1]]
-        
-        # if p == num_observations - 2:
-        #     print(_state_space[best_path[p]])
 
-    return (best_path, best_prob)
+    return best_path
 
+# main to run program
 if  __name__ == "__main__":
 
-    createTrainingAndDevData()
+    # read and process data
+    preprocess()
 
+    # train on data
     train()
 
-    test()
+    # test on the dev set
+    test(_dev_file_name, _dev_results_file_name)
+
+    # test on the test set
+    test(_test_file_name, _test_results_file_name)
