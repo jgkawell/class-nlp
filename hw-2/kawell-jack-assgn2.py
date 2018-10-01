@@ -290,13 +290,20 @@ def viterbi(num_states, transition, emission, prob, observations):
 if  __name__ == "__main__":
 
     # read and process data
+    print("Processing data...")
     preprocess()
 
     # train on data
+    print("Training on data...")
     train()
 
     # test on the dev set
+    print("Running dev data...")
     test(_dev_file_name, _dev_results_file_name)
 
     # test on the test set
+    print("Running test data...")
     test(_test_file_name, _test_results_file_name)
+
+    # finished
+    print("Finished.")

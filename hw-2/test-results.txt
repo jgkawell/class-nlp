@@ -420,7 +420,7 @@
 3	-	HYPH
 4	kong	VBG
 5	villa	<s>
-6	serve	VBP
+6	serve	VB
 7	spicy	JJ
 8	szechuan	NN
 9	cuisine	NN
@@ -510,7 +510,7 @@
 7	that	WDT
 8	serve	VBP
 9	pickled	RB
-10	pigs	CD
+10	pigs	JJ
 11	feet	NNS
 12	.	.
 
@@ -1429,7 +1429,7 @@
 10	bugs	NN
 11	.	.
 
-1	carl's	NN
+1	carl's	FW
 2	-	HYPH
 3	jr	NN
 4	.	.
@@ -1451,7 +1451,7 @@
 7	vegetarian	JJ
 8	.	.
 
-1	enjoy	NN
+1	enjoy	NNS
 2	all	RB
 3	of	IN
 4	your	PRP$
@@ -1628,7 +1628,7 @@
 6	i	PRP
 7	can	MD
 8	go	VB
-9	whenever	NN
+9	whenever	RP
 10	.	.
 
 1	i	PRP
@@ -1639,7 +1639,7 @@
 6	i	PRP
 7	can	MD
 8	go	VB
-9	whenever	NN
+9	whenever	RP
 10	.	.
 
 1	dinner	NN
@@ -1992,7 +1992,7 @@
 2	there	EX
 3	anything	NN
 4	on	IN
-5	cedar	DT
+5	cedar	NN
 6	street	NN
 7	.	.
 
@@ -3366,8 +3366,8 @@
 5	.	.
 
 1	and	CC
-2	no	DT
-3	further	NN
+2	no	UH
+3	further	RB
 4	than	IN
 5	san__francisco	NNP
 6	.	.
@@ -3542,8 +3542,8 @@
 6	am	VBP
 7	a	DT
 8	poor	JJ
-9	starving	NN
-10	student	CC
+9	starving	NNS
+10	student	<s>
 11	it	PRP
 12	would	MD
 13	have	VB
@@ -3638,7 +3638,7 @@
 4	the	DT
 5	mood	NN
 6	for	IN
-7	szechuan	NN
+7	szechuan	JJ
 8	chinese	JJ
 9	food	NN
 10	.	.
@@ -3680,7 +3680,7 @@
 1	well	UH
 2	in	IN
 3	that	DT
-4	case	NN
+4	case	<s>
 5	how	WRB
 6	about	IN
 7	some	DT
@@ -4192,7 +4192,7 @@
 5	less	JJR
 6	.	.
 
-1	hopefully	NN
+1	hopefully	NNS
 2	just	RB
 3	a	DT
 4	block	NN
@@ -4405,7 +4405,7 @@
 4	expensive	JJ
 5	.	.
 
-1	howbout	CD
+1	howbout	NN
 2	spenger's	NNS
 3	.	.
 
@@ -4557,8 +4557,8 @@
 8	.	.
 
 1	uh	UH
-2	up	RB
-3	to	IN
+2	up	VB
+3	to	TO
 4	five	CD
 5	miles	NNS
 6	.	.
@@ -4746,7 +4746,7 @@
 2	me	PRP
 3	something	NN
 4	about	IN
-5	la	NN
+5	la	JJ
 6	tour	NN
 7	eiffel	NN
 8	.	.
@@ -5829,7 +5829,7 @@
 2	wan	VBP
 3	na	TO
 4	eat	VB
-5	polish	NN
+5	polish	JJ
 6	food	NN
 7	at	IN
 8	friday	NN
@@ -6297,7 +6297,7 @@
 6	greek	NN
 7	restaurant	NN
 8	um	UH
-9	casual	NN
+9	casual	VB
 10	for	IN
 11	the	DT
 12	weekends	JJ
@@ -6545,4 +6545,10 @@
 7	five	CD
 8	minutes	NNS
 9	.	.
+
+1	which	WDT
+2	ones	<s>
+3	have	VB
+4	eggs	RP
+5	.	.
 
