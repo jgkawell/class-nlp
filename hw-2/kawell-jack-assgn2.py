@@ -266,14 +266,14 @@ def viterbi(num_states, transition, emission, prob, observations):
 
     # initialize first column of the path prob matrix (first set of states)
     for s in range(0, num_states):
-        path_prob[0,s] = log_probability[s] + log_emission[s,observations[0]]
+        path_prob[0][s] = log_probability[s] + log_emission[s][observations[0]]
 
     # scan through remaining observations and states finding the most probable and saving the backpointer
     for o in range(1, num_observations):
         for s in range(0, num_states):
-            path_prob[o,s] = np.max(path_prob[o-1] + log_transition[s,:]) + log_emission[s,observations[o]]
+            path_prob[o][s] = np.max(path_prob[o-1] + log_transition[s][:]) + log_emission[s][observations[o]]
             # don't need the emission value for back pointer
-            back_pointer[o,s] = np.argmax(path_prob[o-1] + log_transition[s,:])
+            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[s][:])
 
     # pull out the last saved backpointer
     best_pointer = np.argmax(path_prob[-1])
@@ -282,7 +282,7 @@ def viterbi(num_states, transition, emission, prob, observations):
     best_path = np.zeros(num_observations, dtype=np.int32)
     best_path[-1] = best_pointer
     for p in range(num_observations - 2, -1, -1):
-        best_path[p] = back_pointer[p+1, best_path[p+1]]
+        best_path[p] = back_pointer[p+1][best_path[p+1]]
 
     return best_path
 
