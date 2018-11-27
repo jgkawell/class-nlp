@@ -1,103 +1,83 @@
 from collections import Counter
+from itertools import dropwhile
 import numpy as np
 import random
 import re
 
 # initialize the data field variables
-_pos_train_data = []
-_neg_train_data = []
+_train_data_x = []
+_train_data_y = []
+_dev_data_x = []
+_dev_data_y = []
+
 _observation_space = []
 
 # global string values for files and markers
 _pos_file_name = "hotelPosT-train.txt"
-_pos_train_name = "pos-train.txt"
-_pos_dev_name = "pos-dev.txt"
-
 _neg_file_name = "hotelNegT-train.txt"
-_neg_train_name = "neg-train.txt"
-_neg_dev_name = "neg-dev.txt"
-
 
 _test_file_name = "test.txt"
 _test_results_name = "test-results.txt"
 
-_pos_dev_results_name = "pos-dev-results.txt"
-_neg_dev_results_name = "neg-dev-results.txt"
+_dev_results_name = "dev-results.txt"
 
 _unknown_word_marker = "<UNK>"
 
-_pos_prob_dict = dict()
-_neg_prob_dict = dict()
+_prob_dict = dict()
 _dev_classifications = []
 
 # global int values for algorithm params
 _dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
-def preprocess(run):
-    global _pos_train_data
-    global _neg_train_data
+def preprocess():
+    global _train_data_x
+    global _train_data_y
+    global _dev_data_x
+    global _dev_data_y
 
-    file_name = None
-    train_name = None
-    dev_name = None
-    if run == "pos":
-        file_name = _pos_file_name
-        train_name = _pos_train_name
-        dev_name = _pos_dev_name
-    elif run == "neg":
-        file_name = _neg_file_name
-        train_name = _neg_train_name
-        dev_name = _neg_dev_name
+    _train_data = []
+    for run in {"POS", "NEG"}:
+        # set file name to read
+        file_name = None
+        if run == "POS":
+            file_name = _pos_file_name
+        elif run == "NEG":
+            file_name = _neg_file_name
 
-    # read in the training data
-    cur_file = open(file_name, "r")
+        # read in the training data
+        cur_file = open(file_name, "r")
+        train_lines = []
+        for line in cur_file:
+            train_lines.append(line)
 
-    # create subset files for training and dev
-    train_file = open(train_name, "w")
-    dev_file = open(dev_name, "w")
+        # pull out dict of reviews
+        train_dict = getReviews(train_lines)
 
-    train_lines = []
-    for line in cur_file:
-        train_lines.append(line)
+        # create x and y for training
+        for review in train_dict.values():
+            _train_data_x.append(review)
+            _train_data_y.append(run)
+
 
     # get a random sampling of lines
-    sample = random.sample(range(len(train_lines)), int(len(train_lines) / _dev_partition_ratio))
+    sample = random.sample(range(len(_train_data_x)), int(len(_train_data_x) / _dev_partition_ratio))
 
     # pull out the sentences into train and dev sets
-    dev_lines = []
     count = 0
     for i in sample:
         i -= count
-        dev_lines.append(train_lines.pop(i))
+        _dev_data_x.append(_train_data_x.pop(i))
+        _dev_data_y.append(_train_data_y.pop(i))        
         count += 1
-
-    # fill training file
-    for line in train_lines:
-        train_file.write(line)
-        if run == "pos":
-            _pos_train_data.append(line)
-        elif run == "neg":
-            _neg_train_data.append(line)
-
-    # fill dev file
-    for line in dev_lines:
-        dev_file.write(line)
 
 # calculate all needed probs and counts for hmm/viterbi
 def train():
-    global _pos_prob_dict
-    global _neg_prob_dict
 
-    # get the list of sentences with words and pos for training
-    pos_dict = getReviews(_pos_train_data)
-    neg_dict = getReviews(_neg_train_data)
-
-    buildObservationSpace(pos_dict, neg_dict)
+    buildObservationSpace()
 
     # iterate through training data and count the transitions for pos
-    pos_counts_dict = buildCountDict(pos_dict)
-    neg_counts_dict = buildCountDict(neg_dict)
+    buildCountDict()
 
 
     # find the observation likelihood for the pos given words
@@ -134,55 +114,35 @@ def getReviews(data_lines):
     return review_dict
 
 # scan through data and build the observation and state spaces
-def buildObservationSpace(pos_data, neg_data):
+def buildObservationSpace():
     global _observation_space
-    
-    # scan through data and find the spaces along with the single counts in the observation space
-    single_counts = []
-    for i in range(0, 2):
-        train_data = None
-        if i == 0:
-            train_data = pos_data
-        elif i == 1:
-            train_data = neg_data
 
-        for word_list in train_data.values():
-            for word in word_list:
+    all_words = []
+    for x in _train_data_x:
+        all_words += x
 
-                # if word doesn't exist yet in observation space, add it
-                # else, try to remove it from the single counts list
-                if word not in _observation_space:
-                    _observation_space.append(word)
-                    single_counts.append(word)
-                else:
-                    # try to remove word if it is in the single counts list
-                    try:
-                        single_counts.remove(word)
-                    except:
-                        pass
+    word_counter = Counter(all_words)
+    _observation_space = list(set(all_words))
 
-    # remove words with only a single count and replace them with <UNK>
-    for word in single_counts:
-        _observation_space.remove(word)
+    for word, count in word_counter.items():
+        if count == 1:
+            _observation_space.remove(word)
 
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
 
 # build the count dict
-def buildCountDict(train_data):
+def buildCountDict():
 
     # initialize as ones for laplace smoothing
-    count_dict = dict()
-    for word in _observation_space:
-        count_dict[word] = 1
+    count_matrix = np.ones(2, len(_observation_space))
     
     # iterate through training data and count the transitions for pos and emissions for words
-    for word_list in train_data.values():
-        for word in word_list:
-
+    for x, y in zip(_train_data_x, _train_data_y):
+        for word in x:
             # increment the count for the emission count
             try:
-                count_dict[word] += 1
+                count_matrix[word] += 1
             except:
                 count_dict[_unknown_word_marker] += 1
 
@@ -292,8 +252,7 @@ if  __name__ == "__main__":
         restart()
 
         # read and process data
-        preprocess("pos")
-        preprocess("neg")
+        preprocess()
 
         # train on data
         train()
