@@ -19,14 +19,19 @@ _neg_dev_name = "neg-dev.txt"
 
 
 _test_file_name = "test.txt"
+_test_results_name = "test-results.txt"
+
 _pos_dev_results_name = "pos-dev-results.txt"
 _neg_dev_results_name = "neg-dev-results.txt"
 
-_test_results_file_name = "test-results.txt"
 _unknown_word_marker = "<UNK>"
 
+_pos_prob_dict = dict()
+_neg_prob_dict = dict()
+_dev_classifications = []
+
 # global int values for algorithm params
-_dev_partition_ratio = 10
+_dev_partition_ratio = 15
         
 # preprocess the data to create a training and dev set
 def preprocess(run):
@@ -46,7 +51,7 @@ def preprocess(run):
         dev_name = _neg_dev_name
 
     # read in the training data
-    cur_file = open(file_name, "r")
+    cur_file = open(file_name, "r", encoding="utf8")
 
     # create subset files for training and dev
     train_file = open(train_name, "w")
@@ -81,6 +86,8 @@ def preprocess(run):
 
 # calculate all needed probs and counts for hmm/viterbi
 def train():
+    global _pos_prob_dict
+    global _neg_prob_dict
 
     # get the list of sentences with words and pos for training
     pos_dict = getReviews(_pos_train_data)
@@ -95,7 +102,7 @@ def train():
 
 
     # find the observation likelihood for the pos given words
-    pos_prob, neg_prob = buildProbDicts(pos_counts_dict, neg_counts_dict)
+    _pos_prob_dict, _neg_prob_dict = buildProbDicts(pos_counts_dict, neg_counts_dict)
 
     print("Finished training...")
 
@@ -195,80 +202,63 @@ def buildProbDicts(pos_counts_dict, neg_counts_dict):
 
     return pos_prob_dict, neg_prob_dict
 
+def predict(observations):
+
+    pos_prob_sum = 0
+    neg_prob_sum = 0
+    for word in observations:
+        pos_prob_sum += np.log(_pos_prob_dict[word])
+        neg_prob_sum += np.log(_neg_prob_dict[word])
+
+    if pos_prob_sum >= neg_prob_sum:
+        return "POS"
+    else:
+        return "NEG"
+
 #  test using the basic "most frequent tag" technique
 def test(run_file_name, results_file_name):
+    global _dev_classifications
 
     # create results file
     results_file = open(results_file_name, "w")
 
     # retrieve data to run through model
-    data = getReviews(run_file_name)
+    test_file = open(run_file_name, "r")
+    test_lines = []
+    for line in test_file:
+        test_lines.append(line)
+    data = getReviews(test_lines)
             
-    # go through data and run viterbi on each sentence, printing the results
-    for key, word_list in data:
+    # go through data get the most probable class, printing the results
+    for key, word_list in data.items():
         observations = []
         for word in word_list:
             # try to get the index of the word, if not found, substitute the unknown word marker
             try:
-                check = _observation_space.index(word)
+                _observation_space.index(word)
                 observations.append(word)
             except:
                 observations.append(_unknown_word_marker)
 
-        # run viterbi on each sentence
-        best_path = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
+        classification = predict(observations)
+        _dev_classifications.append(classification)
 
         # write results to the file
-        count = 0
-        for entry in sentence:
-            # pull out the num, word, and predicted pos
-            num = str(entry[0])
-            word = str(entry[1])
-            pos = _state_space[best_path[count]]
+        results_file.write(str(key) + "\t" + str(classification))
 
-            # write line
-            results_file.write(num + "\t" + word + "\t" + pos + "\n")
-
-            # increment count
-            count += 1
-
-        # print line between sentences
+        # print line between reviews
         results_file.write("\n")
 
-# implements the viterbi algorithm
-def viterbi(num_states, transition, emission, prob, observations):
+def devAccuracy():
+    
+    count = 0
+    for i in range(0, len(_dev_classifications)):
+        if i < 5 and _dev_classifications[i] == "POS":
+            count += 1
+        elif i >= 5 and _dev_classifications[i] == "NEG":
+            count += 1
 
-    # initialize constants for viterbi
-    num_observations = len(observations)
-    log_transition = np.log(transition)
-    log_emission = np.log(emission)
-    log_probability = np.log(prob)
-
-    # initialize tracking matrices for viterbi
-    path_prob = np.zeros((num_observations, num_states))
-    back_pointer = np.zeros((num_observations, num_states))
-
-    # initialize first column of the path prob matrix (first set of states)
-    for s in range(0, num_states):
-        path_prob[0][s] = log_probability[s] + log_emission[s][observations[0]]
-
-    # scan through remaining observations and states finding the most probable and saving the backpointer
-    for o in range(1, num_observations):
-        for s in range(0, num_states):
-            path_prob[o][s] = np.max(path_prob[o-1] + log_transition[s][:]) + log_emission[s][observations[o]]
-            # don't need the emission value for back pointer
-            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[s][:])
-
-    # pull out the last saved backpointer
-    best_pointer = np.argmax(path_prob[-1])
-
-    # find the remaining backpointers from the last saved
-    best_path = np.zeros(num_observations, dtype=np.int32)
-    best_path[-1] = best_pointer
-    for p in range(num_observations - 2, -1, -1):
-        best_path[p] = back_pointer[p+1][best_path[p+1]]
-
-    return best_path
+    print("Accuracy: " + str(count / len(_dev_classifications)))
 
 # main to run program
 if  __name__ == "__main__":
@@ -285,10 +275,13 @@ if  __name__ == "__main__":
     # test on the dev set
     print("Running dev data...")
     test(_pos_dev_name, _pos_dev_results_name)
+    test(_neg_dev_name, _neg_dev_results_name)
+
+    devAccuracy()
 
     # test on the test set
-    print("Running test data...")
-    test(_test_file_name, _test_results_file_name)
+    # print("Running test data...")
+    # test(_test_file_name, _test_results_file_name)
 
     # finished
     print("Finished.")
