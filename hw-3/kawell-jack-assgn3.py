@@ -1,4 +1,3 @@
-from collections import Counter
 import numpy as np
 import random
 import re
@@ -25,7 +24,7 @@ _unknown_word_marker = "<UNK>"
 _dev_classifications = []
 
 # global int values for algorithm params
-_dev_partition_ratio = 12
+_dev_partition_ratio = 20
         
 # preprocess the data to create a training and dev set
 def preprocess():
@@ -115,22 +114,14 @@ def buildObservationSpace():
     for x in _train_data_x:
         all_words += x
 
-    word_counter = Counter(all_words)
     _observation_space = list(set(all_words))
-
-    for word, count in word_counter.items():
-        if count == 1:
-            _observation_space.remove(word)
-
-    # add unknown word marker <UNK>
-    _observation_space.append(_unknown_word_marker)
 
 # build the count dict
 def buildCountMatrix():
     global _count_matrix
 
     # initialize as ones for laplace smoothing
-    _count_matrix = np.ones((2, len(_observation_space)))
+    _count_matrix = np.zeros((2, len(_observation_space)))
     
     # iterate through training data and count the transitions for pos and emissions for words
     for x, y in zip(_train_data_x, _train_data_y):
@@ -158,8 +149,8 @@ def buildProbMatrix():
     for row in range(0, 2):
         for col in range(0, len(_observation_space)):
             # add num_rows to denominator for laplace smoothing
-            row_sum = _count_matrix[0][col]
-            _prob_matrix[row][col] = _count_matrix[row][col] / (row_sum + 2)
+            row_sum = _count_matrix[0][col] + _count_matrix[1][col]
+            _prob_matrix[row][col] = (_count_matrix[row][col] + 1) / (row_sum + 2)
 
 def predict(observations):
 
@@ -169,13 +160,14 @@ def predict(observations):
         word_index = None
         try:
             word_index = _observation_space.index(word)
+            pos_prob_sum += np.log(_prob_matrix[0][word_index])
+            neg_prob_sum += np.log(_prob_matrix[1][word_index])
         except:
-            word_index = _observation_space.index(_unknown_word_marker)
+            pass
 
-        pos_prob_sum += np.log(_prob_matrix[0][word_index])
-        neg_prob_sum += np.log(_prob_matrix[1][word_index])
+    dif = pos_prob_sum - neg_prob_sum
 
-    if pos_prob_sum >= neg_prob_sum:
+    if dif >= 0:
         return "POS"
     else:
         return "NEG"
@@ -256,7 +248,7 @@ def restart():
 if  __name__ == "__main__":
 
     accuracies = []
-    for i in range(0, 10):
+    for i in range(0, 100):
         restart()
 
         # read and process data
