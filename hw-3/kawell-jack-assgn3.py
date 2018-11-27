@@ -31,7 +31,7 @@ _neg_prob_dict = dict()
 _dev_classifications = []
 
 # global int values for algorithm params
-_dev_partition_ratio = 15
+_dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
 def preprocess(run):
@@ -51,7 +51,7 @@ def preprocess(run):
         dev_name = _neg_dev_name
 
     # read in the training data
-    cur_file = open(file_name, "r", encoding="utf8")
+    cur_file = open(file_name, "r")
 
     # create subset files for training and dev
     train_file = open(train_name, "w")
@@ -93,8 +93,7 @@ def train():
     pos_dict = getReviews(_pos_train_data)
     neg_dict = getReviews(_neg_train_data)
 
-    buildObservationSpace(pos_dict)
-    buildObservationSpace(neg_dict)
+    buildObservationSpace(pos_dict, neg_dict)
 
     # iterate through training data and count the transitions for pos
     pos_counts_dict = buildCountDict(pos_dict)
@@ -103,8 +102,6 @@ def train():
 
     # find the observation likelihood for the pos given words
     _pos_prob_dict, _neg_prob_dict = buildProbDicts(pos_counts_dict, neg_counts_dict)
-
-    print("Finished training...")
 
 # pulls out reviews into a dict of IDs and list of words
 def getReviews(data_lines):
@@ -137,26 +134,32 @@ def getReviews(data_lines):
     return review_dict
 
 # scan through data and build the observation and state spaces
-def buildObservationSpace(train_data):
+def buildObservationSpace(pos_data, neg_data):
     global _observation_space
     
     # scan through data and find the spaces along with the single counts in the observation space
-    _observation_space = []
     single_counts = []
-    for word_list in train_data.values():
-        for word in word_list:
+    for i in range(0, 2):
+        train_data = None
+        if i == 0:
+            train_data = pos_data
+        elif i == 1:
+            train_data = neg_data
 
-            # if word doesn't exist yet in observation space, add it
-            # else, try to remove it from the single counts list
-            if word not in _observation_space:
-                _observation_space.append(word)
-                single_counts.append(word)
-            else:
-                # try to remove word if it is in the single counts list
-                try:
-                    single_counts.remove(word)
-                except:
-                    pass
+        for word_list in train_data.values():
+            for word in word_list:
+
+                # if word doesn't exist yet in observation space, add it
+                # else, try to remove it from the single counts list
+                if word not in _observation_space:
+                    _observation_space.append(word)
+                    single_counts.append(word)
+                else:
+                    # try to remove word if it is in the single counts list
+                    try:
+                        single_counts.remove(word)
+                    except:
+                        pass
 
     # remove words with only a single count and replace them with <UNK>
     for word in single_counts:
@@ -165,7 +168,7 @@ def buildObservationSpace(train_data):
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
 
-# build the count matrices needed to build the prob matrices
+# build the count dict
 def buildCountDict(train_data):
 
     # initialize as ones for laplace smoothing
@@ -183,9 +186,11 @@ def buildCountDict(train_data):
             except:
                 count_dict[_unknown_word_marker] += 1
 
+    print(count_dict[_unknown_word_marker])
+
     return count_dict
     
-#  build the prob matrices (both transition and emission)
+# build the prob dictionary
 def buildProbDicts(pos_counts_dict, neg_counts_dict):
 
     word_sums = dict()
@@ -258,26 +263,48 @@ def devAccuracy():
         elif i >= 5 and _dev_classifications[i] == "NEG":
             count += 1
 
-    print("Accuracy: " + str(count / len(_dev_classifications)))
+    acc = np.round(count / len(_dev_classifications) * 100, 2)
+
+    print("Accuracy: " + str(acc) + "%")
+    return acc
+
+def restart():
+    global _pos_train_data
+    global _neg_train_data
+    global _observation_space
+    global _pos_prob_dict
+    global _neg_prob_dict
+    global _dev_classifications
+
+
+    _pos_train_data = []
+    _neg_train_data = []
+    _observation_space = []
+    _pos_prob_dict = dict()
+    _neg_prob_dict = dict()
+    _dev_classifications = []
 
 # main to run program
 if  __name__ == "__main__":
 
-    # read and process data
-    print("Processing data...")
-    preprocess("pos")
-    preprocess("neg")
+    accuracies = []
+    for i in range(0, 100):
+        restart()
 
-    # train on data
-    print("Training on data...")
-    train()
+        # read and process data
+        preprocess("pos")
+        preprocess("neg")
 
-    # test on the dev set
-    print("Running dev data...")
-    test(_pos_dev_name, _pos_dev_results_name)
-    test(_neg_dev_name, _neg_dev_results_name)
+        # train on data
+        train()
 
-    devAccuracy()
+        # test on the dev set
+        test(_pos_dev_name, _pos_dev_results_name)
+        test(_neg_dev_name, _neg_dev_results_name)
+
+        accuracies.append(devAccuracy())
+
+    print("Average Accuracy: " + str(np.average(accuracies)) + "%")
 
     # test on the test set
     # print("Running test data...")
