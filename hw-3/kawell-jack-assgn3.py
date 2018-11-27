@@ -1,5 +1,4 @@
 from collections import Counter
-from itertools import dropwhile
 import numpy as np
 import random
 import re
@@ -11,6 +10,8 @@ _dev_data_x = []
 _dev_data_y = []
 
 _observation_space = []
+_count_matrix = []
+_prob_matrix = []
 
 # global string values for files and markers
 _pos_file_name = "hotelPosT-train.txt"
@@ -18,16 +19,13 @@ _neg_file_name = "hotelNegT-train.txt"
 
 _test_file_name = "test.txt"
 _test_results_name = "test-results.txt"
-
 _dev_results_name = "dev-results.txt"
-
 _unknown_word_marker = "<UNK>"
 
-_prob_dict = dict()
 _dev_classifications = []
 
 # global int values for algorithm params
-_dev_partition_ratio = 10
+_dev_partition_ratio = 12
         
 # preprocess the data to create a training and dev set
 def preprocess():
@@ -46,7 +44,7 @@ def preprocess():
             file_name = _neg_file_name
 
         # read in the training data
-        cur_file = open(file_name, "r")
+        cur_file = open(file_name, "r", encoding="utf8")
         train_lines = []
         for line in cur_file:
             train_lines.append(line)
@@ -59,7 +57,6 @@ def preprocess():
             _train_data_x.append(review)
             _train_data_y.append(run)
 
-
     # get a random sampling of lines
     sample = random.sample(range(len(_train_data_x)), int(len(_train_data_x) / _dev_partition_ratio))
 
@@ -68,7 +65,7 @@ def preprocess():
     for i in sample:
         i -= count
         _dev_data_x.append(_train_data_x.pop(i))
-        _dev_data_y.append(_train_data_y.pop(i))        
+        _dev_data_y.append(_train_data_y.pop(i))   
         count += 1
 
 # calculate all needed probs and counts for hmm/viterbi
@@ -76,12 +73,9 @@ def train():
 
     buildObservationSpace()
 
-    # iterate through training data and count the transitions for pos
-    buildCountDict()
+    buildCountMatrix()
 
-
-    # find the observation likelihood for the pos given words
-    _pos_prob_dict, _neg_prob_dict = buildProbDicts(pos_counts_dict, neg_counts_dict)
+    buildProbMatrix()
 
 # pulls out reviews into a dict of IDs and list of words
 def getReviews(data_lines):
@@ -132,48 +126,54 @@ def buildObservationSpace():
     _observation_space.append(_unknown_word_marker)
 
 # build the count dict
-def buildCountDict():
+def buildCountMatrix():
+    global _count_matrix
 
     # initialize as ones for laplace smoothing
-    count_matrix = np.ones(2, len(_observation_space))
+    _count_matrix = np.ones((2, len(_observation_space)))
     
     # iterate through training data and count the transitions for pos and emissions for words
     for x, y in zip(_train_data_x, _train_data_y):
+        # pull out the y index
+        if y == "POS":
+            index = 0    
+        elif y == "NEG":
+            index = 1
+
         for word in x:
             # increment the count for the emission count
             try:
-                count_matrix[word] += 1
+                _count_matrix[index][_observation_space.index(word)] += 1
             except:
-                count_dict[_unknown_word_marker] += 1
-
-    print(count_dict[_unknown_word_marker])
-
-    return count_dict
+                _count_matrix[index][_observation_space.index(_unknown_word_marker)] += 1
     
 # build the prob dictionary
-def buildProbDicts(pos_counts_dict, neg_counts_dict):
+def buildProbMatrix():
+    global _prob_matrix
 
-    word_sums = dict()
-    for word in _observation_space:
-        word_sums[word] = pos_counts_dict[word] + neg_counts_dict[word]
+    # scan through and find the sums of the counts on each row (needed for laplace smoothing)
+    _prob_matrix = np.zeros((2, len(_observation_space)))
 
-    pos_prob_dict = dict()
-    for word in _observation_space:
-        pos_prob_dict[word] = pos_counts_dict[word] / word_sums[word]
-
-    neg_prob_dict = dict()
-    for word in _observation_space:
-        neg_prob_dict[word] = neg_counts_dict[word] / word_sums[word]
-
-    return pos_prob_dict, neg_prob_dict
+    # find the transition probabilities for the pos
+    for row in range(0, 2):
+        for col in range(0, len(_observation_space)):
+            # add num_rows to denominator for laplace smoothing
+            row_sum = _count_matrix[0][col]
+            _prob_matrix[row][col] = _count_matrix[row][col] / (row_sum + 2)
 
 def predict(observations):
 
     pos_prob_sum = 0
     neg_prob_sum = 0
     for word in observations:
-        pos_prob_sum += np.log(_pos_prob_dict[word])
-        neg_prob_sum += np.log(_neg_prob_dict[word])
+        word_index = None
+        try:
+            word_index = _observation_space.index(word)
+        except:
+            word_index = _observation_space.index(_unknown_word_marker)
+
+        pos_prob_sum += np.log(_prob_matrix[0][word_index])
+        neg_prob_sum += np.log(_prob_matrix[1][word_index])
 
     if pos_prob_sum >= neg_prob_sum:
         return "POS"
@@ -214,41 +214,49 @@ def test(run_file_name, results_file_name):
         # print line between reviews
         results_file.write("\n")
 
-def devAccuracy():
-    
-    count = 0
-    for i in range(0, len(_dev_classifications)):
-        if i < 5 and _dev_classifications[i] == "POS":
-            count += 1
-        elif i >= 5 and _dev_classifications[i] == "NEG":
-            count += 1
+def dev():
+    correct = 0
+    for x, y in zip(_dev_data_x, _dev_data_y):
+        y_hat = predict(x)
+        if y_hat == y:
+            correct += 1
 
-    acc = np.round(count / len(_dev_classifications) * 100, 2)
+    acc = np.round(correct / len(_dev_data_x) * 100, 2)
 
     print("Accuracy: " + str(acc) + "%")
+
     return acc
 
 def restart():
-    global _pos_train_data
-    global _neg_train_data
+    global _train_data_x
+    global _train_data_y
+    global _dev_data_x
+    global _dev_data_y
+
     global _observation_space
-    global _pos_prob_dict
-    global _neg_prob_dict
+    global _count_matrix
+    global _prob_matrix
+
     global _dev_classifications
 
 
-    _pos_train_data = []
-    _neg_train_data = []
+    _train_data_x = []
+    _train_data_y = []
+    _dev_data_x = []
+    _dev_data_y = []
+
     _observation_space = []
-    _pos_prob_dict = dict()
-    _neg_prob_dict = dict()
+    _count_matrix = []
+    _prob_matrix = []
+
     _dev_classifications = []
+
 
 # main to run program
 if  __name__ == "__main__":
 
     accuracies = []
-    for i in range(0, 100):
+    for i in range(0, 10):
         restart()
 
         # read and process data
@@ -258,12 +266,9 @@ if  __name__ == "__main__":
         train()
 
         # test on the dev set
-        test(_pos_dev_name, _pos_dev_results_name)
-        test(_neg_dev_name, _neg_dev_results_name)
+        accuracies.append(dev())
 
-        accuracies.append(devAccuracy())
-
-    print("Average Accuracy: " + str(np.average(accuracies)) + "%")
+    print("Average Accuracy: " + str(np.round(np.average(accuracies), 2)) + "%")
 
     # test on the test set
     # print("Running test data...")
