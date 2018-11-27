@@ -1,3 +1,4 @@
+from collections import Counter
 import numpy as np
 import random
 import re
@@ -18,13 +19,11 @@ _neg_file_name = "hotelNegT-train.txt"
 
 _test_file_name = "test.txt"
 _test_results_name = "test-results.txt"
-_dev_results_name = "dev-results.txt"
-_unknown_word_marker = "<UNK>"
 
 _dev_classifications = []
 
 # global int values for algorithm params
-_dev_partition_ratio = 20
+_dev_partition_ratio = 15
         
 # preprocess the data to create a training and dev set
 def preprocess():
@@ -43,7 +42,7 @@ def preprocess():
             file_name = _neg_file_name
 
         # read in the training data
-        cur_file = open(file_name, "r", encoding="utf8")
+        cur_file = open(file_name, "r")
         train_lines = []
         for line in cur_file:
             train_lines.append(line)
@@ -66,15 +65,6 @@ def preprocess():
         _dev_data_x.append(_train_data_x.pop(i))
         _dev_data_y.append(_train_data_y.pop(i))   
         count += 1
-
-# calculate all needed probs and counts for hmm/viterbi
-def train():
-
-    buildObservationSpace()
-
-    buildCountMatrix()
-
-    buildProbMatrix()
 
 # pulls out reviews into a dict of IDs and list of words
 def getReviews(data_lines):
@@ -106,7 +96,16 @@ def getReviews(data_lines):
 
     return review_dict
 
-# scan through data and build the observation and state spaces
+# calculate all needed probs and counts for prediction
+def train():
+
+    buildObservationSpace()
+
+    buildCountMatrix()
+
+    buildProbMatrix()
+
+# scan through data and build the observation set
 def buildObservationSpace():
     global _observation_space
 
@@ -114,13 +113,19 @@ def buildObservationSpace():
     for x in _train_data_x:
         all_words += x
 
+    word_counter = Counter(all_words)
+
+    top_words = word_counter.most_common(10)
     _observation_space = list(set(all_words))
 
-# build the count dict
+    for word in top_words:
+        _observation_space.remove(word[0])
+
+# build the count matrix for calculating probabilities
 def buildCountMatrix():
     global _count_matrix
 
-    # initialize as ones for laplace smoothing
+    # initialize count matrix
     _count_matrix = np.zeros((2, len(_observation_space)))
     
     # iterate through training data and count the transitions for pos and emissions for words
@@ -136,22 +141,27 @@ def buildCountMatrix():
             try:
                 _count_matrix[index][_observation_space.index(word)] += 1
             except:
-                _count_matrix[index][_observation_space.index(_unknown_word_marker)] += 1
+                pass
     
-# build the prob dictionary
+# build the prob matrix from the counts (using add-1 smoothing)
 def buildProbMatrix():
     global _prob_matrix
 
     # scan through and find the sums of the counts on each row (needed for laplace smoothing)
     _prob_matrix = np.zeros((2, len(_observation_space)))
 
-    # find the transition probabilities for the pos
+    # find corpus counts
+    row_sum = np.zeros(len(_observation_space))
+    for col in range(0, len(_observation_space)):
+        row_sum[col] = _count_matrix[0][col] + _count_matrix[1][col]
+
+
+    # calculate the probabilities using laplacian estimates
     for row in range(0, 2):
         for col in range(0, len(_observation_space)):
-            # add num_rows to denominator for laplace smoothing
-            row_sum = _count_matrix[0][col] + _count_matrix[1][col]
-            _prob_matrix[row][col] = (_count_matrix[row][col] + 1) / (row_sum + 2)
+            _prob_matrix[row][col] = (_count_matrix[row][col] + 1) / (row_sum[col] + len(_observation_space))
 
+# make a prediction on a word sequence using probabilities calculated in training
 def predict(observations):
 
     pos_prob_sum = 0
@@ -165,14 +175,12 @@ def predict(observations):
         except:
             pass
 
-    dif = pos_prob_sum - neg_prob_sum
-
-    if dif >= 0:
+    if pos_prob_sum >= neg_prob_sum:
         return "POS"
     else:
         return "NEG"
 
-#  test using the basic "most frequent tag" technique
+#  test using the given file name
 def test(run_file_name, results_file_name):
     global _dev_classifications
 
@@ -188,16 +196,8 @@ def test(run_file_name, results_file_name):
             
     # go through data get the most probable class, printing the results
     for key, word_list in data.items():
-        observations = []
-        for word in word_list:
-            # try to get the index of the word, if not found, substitute the unknown word marker
-            try:
-                _observation_space.index(word)
-                observations.append(word)
-            except:
-                observations.append(_unknown_word_marker)
 
-        classification = predict(observations)
+        classification = predict(word_list)
         _dev_classifications.append(classification)
 
         # write results to the file
