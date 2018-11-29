@@ -18,12 +18,10 @@ _pos_file_name = "hotelPosT-train.txt"
 _neg_file_name = "hotelNegT-train.txt"
 
 _test_file_name = "test.txt"
-_test_results_name = "test-results.txt"
-
-_dev_classifications = []
+_test_results_name = "kawell-jack-assgn3-out.txt"
 
 # global int values for algorithm params
-_dev_partition_ratio = 15
+_dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
 def preprocess(dev_run):
@@ -116,7 +114,7 @@ def buildObservationSpace():
 
     word_counter = Counter(all_words)
 
-    top_words = word_counter.most_common(10)
+    top_words = word_counter.most_common(5)
     _observation_space = list(set(all_words))
 
     for word in top_words:
@@ -127,7 +125,7 @@ def buildCountMatrix():
     global _count_matrix
 
     # initialize count matrix
-    _count_matrix = np.zeros((2, len(_observation_space)))
+    _count_matrix = np.ones((2, len(_observation_space)))
     
     # iterate through training data and count the transitions for pos and emissions for words
     for x, y in zip(_train_data_x, _train_data_y):
@@ -150,17 +148,15 @@ def buildProbMatrix():
 
     # scan through and find the sums of the counts on each row (needed for laplace smoothing)
     _prob_matrix = np.zeros((2, len(_observation_space)))
-
-    # find corpus counts
-    row_sum = np.zeros(len(_observation_space))
-    for col in range(0, len(_observation_space)):
-        row_sum[col] = _count_matrix[0][col] + _count_matrix[1][col]
-
+    row_sums = np.zeros(2)
+    for row in range(0, 2):
+        for col in range(0, len(_observation_space)):
+            row_sums[row] += _count_matrix[row][col]
 
     # calculate the probabilities using laplacian estimates
     for row in range(0, 2):
         for col in range(0, len(_observation_space)):
-            _prob_matrix[row][col] = (_count_matrix[row][col] + 1) / (row_sum[col] + len(_observation_space))
+            _prob_matrix[row][col] = (_count_matrix[row][col]) / (row_sums[row] + len(_observation_space))
 
 # make a prediction on a word sequence using probabilities calculated in training
 def predict(observations):
@@ -183,8 +179,6 @@ def predict(observations):
 
 #  test using the given file name
 def test(run_file_name, results_file_name):
-    global _dev_classifications
-
     # create results file
     results_file = open(results_file_name, "w")
 
@@ -197,14 +191,8 @@ def test(run_file_name, results_file_name):
             
     # go through data get the most probable class, printing the results
     for key, word_list in data.items():
-
         classification = predict(word_list)
-        _dev_classifications.append(classification)
-
-        # write results to the file
         results_file.write(str(key) + "\t" + str(classification))
-
-        # print line between reviews
         results_file.write("\n")
 
 def dev():
@@ -242,23 +230,14 @@ def restart():
     _count_matrix = []
     _prob_matrix = []
 
-    _dev_classifications = []
-
-
 # main to run program
 if  __name__ == "__main__":
 
     accuracies = []
-    for i in range(0, 100):
+    for i in range(0, 1000):
         restart()
-
-        # read and process data
         preprocess(True)
-
-        # train on data
         train()
-
-        # test on the dev set
         accuracies.append(dev())
 
     print("Average Accuracy: " + str(np.round(np.average(accuracies), 2)) + "%")
