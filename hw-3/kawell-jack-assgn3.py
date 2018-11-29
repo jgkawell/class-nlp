@@ -104,7 +104,7 @@ def train():
 
     buildProbMatrix()
 
-# scan through data and build the observation set
+# scan through data and build the observation space
 def buildObservationSpace():
     global _observation_space
 
@@ -127,7 +127,7 @@ def buildCountMatrix():
     # initialize count matrix
     _count_matrix = np.ones((2, len(_observation_space)))
     
-    # iterate through training data and count the transitions for pos and emissions for words
+    # iterate through training data and count occurances
     for x, y in zip(_train_data_x, _train_data_y):
         # pull out the y index
         if y == "POS":
@@ -136,7 +136,7 @@ def buildCountMatrix():
             index = 1
 
         for word in x:
-            # increment the count for the emission count
+            # increment the count if word exists
             try:
                 _count_matrix[index][_observation_space.index(word)] += 1
             except:
@@ -234,7 +234,7 @@ def restart():
 if  __name__ == "__main__":
 
     accuracies = []
-    for i in range(0, 1000):
+    for i in range(0, 100):
         restart()
         preprocess(True)
         train()
