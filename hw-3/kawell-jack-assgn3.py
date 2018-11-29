@@ -26,7 +26,7 @@ _dev_classifications = []
 _dev_partition_ratio = 15
         
 # preprocess the data to create a training and dev set
-def preprocess():
+def preprocess(dev_run):
     global _train_data_x
     global _train_data_y
     global _dev_data_x
@@ -42,7 +42,7 @@ def preprocess():
             file_name = _neg_file_name
 
         # read in the training data
-        cur_file = open(file_name, "r")
+        cur_file = open(file_name, "r", encoding="utf8")
         train_lines = []
         for line in cur_file:
             train_lines.append(line)
@@ -56,15 +56,16 @@ def preprocess():
             _train_data_y.append(run)
 
     # get a random sampling of lines
-    sample = random.sample(range(len(_train_data_x)), int(len(_train_data_x) / _dev_partition_ratio))
+    if dev_run:
+        sample = random.sample(range(len(_train_data_x)), int(len(_train_data_x) / _dev_partition_ratio))
 
-    # pull out the sentences into train and dev sets
-    count = 0
-    for i in sample:
-        i -= count
-        _dev_data_x.append(_train_data_x.pop(i))
-        _dev_data_y.append(_train_data_y.pop(i))   
-        count += 1
+        # pull out the sentences into train and dev sets
+        count = 0
+        for i in sample:
+            i -= count
+            _dev_data_x.append(_train_data_x.pop(i))
+            _dev_data_y.append(_train_data_y.pop(i))   
+            count += 1
 
 # pulls out reviews into a dict of IDs and list of words
 def getReviews(data_lines):
@@ -252,7 +253,7 @@ if  __name__ == "__main__":
         restart()
 
         # read and process data
-        preprocess()
+        preprocess(True)
 
         # train on data
         train()
@@ -263,8 +264,11 @@ if  __name__ == "__main__":
     print("Average Accuracy: " + str(np.round(np.average(accuracies), 2)) + "%")
 
     # test on the test set
-    # print("Running test data...")
-    # test(_test_file_name, _test_results_file_name)
+    print("Running test data...")
+    restart()
+    preprocess(False)
+    train()
+    test(_test_file_name, _test_results_name)
 
     # finished
     print("Finished.")
