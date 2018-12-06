@@ -59,12 +59,12 @@ def findEntities(data):
 
 def taggedData(file):
     for line in file:
-        print(line)
+        # print(line)
         if line.strip() == '':
-            print("<s>", "o")
+            # print("<s>", "o")
             yield(['</s>', 'O'])
         else:
-            print(line.strip().split())
+            # print(line.strip().split())
             yield line.strip().split()[1:]
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ _observation_prob = [[]]
 _transition_prob = [[]]
 
 # global string values for files and markers
-_full_file_name = "berp-POS-training.txt"
+_full_file_name = "gene-trainF18.txt"
 _train_file_name = "train.txt"
 _dev_file_name = "dev.txt"
 _test_file_name = "test.txt"
@@ -211,7 +211,7 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
 
     return prob_matrix
 
-#  test using the basic "most frequent tag" technique
+#  test using viterbi technique
 def test(run_file_name, results_file_name):
 
     # create results file
