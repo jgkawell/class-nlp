@@ -1,10 +1,13 @@
 from collections import Counter
 import numpy as np
 import random
+from bpe import Encoder
 
 # initialize the data field variables
 _train_data = []
 _state_space = []
+_tokenized_train_x = []
+_tokenized_train_y = []
 _observation_space = []
 _initial_prob = []
 _observation_prob = [[]]
@@ -17,10 +20,10 @@ _dev_file_name = "dev.txt"
 _test_file_name = "test.txt"
 _dev_results_file_name = "dev-results.txt"
 _test_results_file_name = "test-results.txt"
-_unknown_word_marker = "<UNK>"
 _sentence_marker = "<s>"
 
 # global int values for algorithm params
+_encoder = Encoder(vocab_size=10000, pct_bpe=0.88, ngram_min=1, ngram_max=10)
 _dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
@@ -70,18 +73,18 @@ def train():
     global _observation_prob
     global _transition_prob
 
-    # get the list of sentences with words and pos for training
+    # get the list of sentences with words and entity for training
     _train_data = getSentences(_train_file_name)
 
     len_observation_space, len_state_space = buildSpaces()
 
-    # iterate through training data and count the transitions for pos
+    # iterate through training data and count the transitions for entity
     transition_count_matrix, observation_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
 
-    # find the observation likelihood for the pos given words
+    # find the observation likelihood for the entity given words
     _observation_prob = buildProbMatrix(len_state_space, len_observation_space, observation_count_matrix)
 
-    # find the transition probability for pos given previous pos
+    # find the transition probability for entity given previous entity
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
     # calculate the initial probabilities
@@ -89,25 +92,22 @@ def train():
     for s in range(0, len(_state_space)):
         _initial_prob.append(_transition_prob[sentence_beginning_index][s])
 
-# pulls out words and pos in sentences
+# pulls out words and entity in sentences
 def getSentences(file_name, dev=True):
      # read in training data
     lines = open(file_name, "r")
     
-    num_sentences = 0    
     sentence_list = []
     sentence = []
     for line in lines:
-        # increment the count for the total length of the training data
-        num_sentences += 1
-         #  pull out the individual columns of the data
+         #  pull out the individual fields of the data
         fields = line.rstrip("\n\r").split("\t")
         
         # if the data is not a blank line, add the data sentence
         # else, add sentence to list and clear for new sentence
         if len(fields) > 1:
-            # if it is the dev file, we can pull out the pos (2) position for training
-            # else, we only have two positions since there is no pos field
+            # if it is the dev file, we can pull out the entity (2) position for training
+            # else, we only have two positions since there is no entity field
             if dev:
                 entry = (fields[0], fields[1], fields[2])
             else:
@@ -126,39 +126,54 @@ def getSentences(file_name, dev=True):
 def buildSpaces():
     global _observation_space
     global _state_space
+    global _tokenized_train_x
+    global _tokenized_train_y
     
-    # scan through data and find the spaces along with the single counts in the observation space
-    _observation_space = []
-    single_counts = []
-    _state_space = []
+    # use the bpe encoder to make the dictionary
+    all_words = ""
+    sentence_string_list = []
+    sentence_string = ""
     for sentence in _train_data:
         for entry in sentence:
-            # pull out the word and pos
-            word = entry[1]
-            part = entry[2]
+            sentence_string += entry[1].lower() + " "
+            
+        all_words += sentence_string
+        sentence_string_list.append(sentence_string)
+        sentence_string = ""
 
-            # if word doesn't exist yet in observation space, add it
-            # else, try to remove it from the single counts list
-            if word not in _observation_space:
-                _observation_space.append(word)
-                single_counts.append(word)
-            else:
-                # try to remove word if it is in the single counts list
-                try:
-                    single_counts.remove(word)
-                except:
-                    pass
+    
+    _encoder.fit(all_words.split('\n'))
 
-            # if pos doesn't exist yet in state space, add it
-            if part not in _state_space:
-                _state_space.append(part)
 
-    # remove words with only a single count and replace them with <UNK>
-    for word in single_counts:
-        _observation_space.remove(word)
+    for sentence in _train_data:
+        for entry in sentence:
+            word = entry[1].lower()
+            entity = entry[2]
 
-    # add unknown word marker <UNK>
-    _observation_space.append(_unknown_word_marker)
+            token = _encoder.tokenize(word)
+
+            if len(token) == 1:
+                _tokenized_train_x.append(token[0])
+                _tokenized_train_y.append(entity)
+            else:      
+                for t in token:
+                    if t != "__sow" and t != "__eow":
+                        _tokenized_train_x.append(t)
+                        _tokenized_train_y.append(entity)
+
+        _tokenized_train_x.append(_sentence_marker)
+        _tokenized_train_y.append(_sentence_marker)
+
+
+    # count observations and states
+    # obs_counter = Counter(_tokenized_train_x)
+    state_counter = Counter(_tokenized_train_y)
+
+    # populate spaces from counters
+    _observation_space = list(_encoder.bpe_vocab.keys())
+    _observation_space += list(_encoder.word_vocab.keys())
+    _observation_space.append(_sentence_marker)
+    _state_space = list(state_counter.keys())
 
     #  add sentence marker (<s>)
     _state_space.append(_sentence_marker)
@@ -172,24 +187,18 @@ def buildCountMatrices(len_state_space, len_observation_space):
     transition_count_matrix = np.ones((len_state_space, len_state_space))
     emission_count_matrix = np.ones((len_state_space, len_observation_space))
     
-    # iterate through training data and count the transitions for pos and emissions for words
-    for sentence in _train_data:
-        prev_part = _sentence_marker
-        for entry in sentence:
-            cur_word = entry[1]
-            cur_part = entry[2]
+    # iterate through training data and count the transitions for entities and emissions for words
+    prev_x = _sentence_marker
+    for x, y in zip(_tokenized_train_x, _tokenized_train_y):
 
-            # increment the count for the transition count
-            transition_count_matrix[_state_space.index(cur_part)][_state_space.index(prev_part)] += 1
+        # increment the count for the transition count
+        transition_count_matrix[_state_space.index(y)][_state_space.index(prev_x)] += 1
 
-            # set the previous part
-            prev_part = cur_part
-
-            # increment the count for the emission count
-            try:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
-            except:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
+        # increment the count for the emission count
+        emission_count_matrix[_state_space.index(y)][_observation_space.index(x)] += 1
+        
+        # set the previous entity
+        prev_x = y
 
     return (transition_count_matrix, emission_count_matrix)
 
@@ -203,7 +212,7 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
         for col in range(0, num_cols): 
             row_sums[row] += count_matrix[row][col]
 
-    # find the transition probabilities for the pos
+    # find the transition probabilities for the entity
     for row in range(0, num_rows):
         for col in range(0, num_cols):
             # add num_rows to denominator for laplace smoothing
@@ -222,31 +231,47 @@ def test(run_file_name, results_file_name):
             
     # go through data and run viterbi on each sentence, printing the results
     for sentence in data:
+        numbers = []
         observations = []
         for entry in sentence:
-            word = entry[1]
-            # try to get the index of the word, if not found, substitute the unknown word marker
-            try:
-                observations.append(_observation_space.index(word))
-            except:
-                observations.append(_observation_space.index(_unknown_word_marker))
+            num = entry[0]
+            word = entry[1].lower()
+
+            token = _encoder.tokenize(word)
+
+            if len(token) == 1:
+                observations.append(_observation_space.index(token[0]))
+                numbers.append(num)
+            else:      
+                for t in token:
+                    if t != "__sow" and t != "__eow":
+                        observations.append(_observation_space.index(t))
+                        numbers.append(num)
 
         # run viterbi on each sentence
         best_path = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
 
         # write results to the file
-        count = 0
-        for entry in sentence:
-            # pull out the num, word, and predicted pos
-            num = str(entry[0])
-            word = str(entry[1])
-            pos = _state_space[best_path[count]]
+        obs_count = 0
+        sen_count = 0
+        prev_num = '1'
+        for num in numbers:
+            # pull out the num, word, and predicted entity
+            entity = _state_space[best_path[obs_count]]
 
-            # write line
-            results_file.write(num + "\t" + word + "\t" + pos + "\n")
+            if prev_num != num:
+                # write line
+                results_file.write(prev_num + "\t" + sentence[sen_count][1] + "\t" + entity + "\n")
+
+                # set prev_num and sentence count
+                prev_num = num
+                sen_count += 1
 
             # increment count
-            count += 1
+            obs_count += 1
+
+        # write line
+        results_file.write(prev_num + "\t" + sentence[sen_count][1] + "\t" + entity + "\n")
 
         # print line between sentences
         results_file.write("\n")
@@ -301,9 +326,9 @@ if  __name__ == "__main__":
     print("Running dev data...")
     test(_dev_file_name, _dev_results_file_name)
 
-    # test on the test set
-    print("Running test data...")
-    test(_test_file_name, _test_results_file_name)
+    # # test on the test set
+    # print("Running test data...")
+    # test(_test_file_name, _test_results_file_name)
 
     # finished
     print("Finished.")
