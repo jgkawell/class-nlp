@@ -21,7 +21,7 @@ _unknown_word_marker = "<UNK>"
 
 # global int values for algorithm params
 _dev_partition_ratio = 1 / 10
-_smoothing_value = 0
+_smoothing_value = 0.5
 _like_zero = 2.2250738585072014**-308
         
 # preprocess the data to create a training and dev set
@@ -85,7 +85,7 @@ def train():
     # find the transition probability for pos given previous pos
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
-    # blank out O->I and <s>->I transitions
+    # blank out O->I transitions
     _transition_prob[_state_space.index('O')][_state_space.index('I')] = _like_zero
 
     # calculate the initial probabilities
@@ -137,28 +137,22 @@ def buildSpaces():
     
     # scan through data and find the spaces along with the single counts in the observation space
     _observation_space = []
-    single_counts = []
-    _state_space = []
+    all_words = []
     for sentence in _train_data:
         for entry in sentence:
             # pull out the word and pos
-            word = entry[1]
+            all_words.append(entry[1])
 
-            # if word doesn't exist yet in observation space, add it
-            # else, try to remove it from the single counts list
-            if word not in _observation_space:
-                _observation_space.append(word)
-                single_counts.append(word)
-            else:
-                # try to remove word if it is in the single counts list
-                try:
-                    single_counts.remove(word)
-                except:
-                    pass
+    # count all words
+    word_counter = Counter(all_words)
+
+    # copy all words
+    _observation_space = list(word_counter.keys())
 
     # remove words with only a single count and replace them with <UNK>
-    for word in single_counts:
-        _observation_space.remove(word)
+    for word, count in word_counter.items():
+        if count < 2:
+            _observation_space.remove(word)
 
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
