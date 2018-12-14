@@ -4,7 +4,7 @@ import random
 
 # initialize the data field variables
 _train_data = []
-_state_space = []
+_state_space = ['B', 'I', 'O']
 _observation_space = []
 _initial_prob = []
 _observation_prob = [[]]
@@ -18,10 +18,9 @@ _test_file_name = "test.txt"
 _dev_results_file_name = "dev-results.txt"
 _test_results_file_name = "test-results.txt"
 _unknown_word_marker = "<UNK>"
-_sentence_marker = "<s>"
 
 # global int values for algorithm params
-_dev_partition_ratio = 10
+_dev_partition_ratio = 1 / 10
 _like_zero = 2.2250738585072014**-308
         
 # preprocess the data to create a training and dev set
@@ -44,7 +43,7 @@ def preprocess():
             temp_sentence = []
         
     # get a random sampling of sentence indices
-    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / _dev_partition_ratio))
+    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) * _dev_partition_ratio))
 
     # pull out the sentences into train and dev sets
     dev_sentences = []
@@ -77,7 +76,7 @@ def train():
     len_observation_space, len_state_space = buildSpaces()
 
     # iterate through training data and count the transitions for pos
-    transition_count_matrix, observation_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
+    transition_count_matrix, observation_count_matrix, initial_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
 
     # find the observation likelihood for the pos given words
     _observation_prob = buildProbMatrix(len_state_space, len_observation_space, observation_count_matrix)
@@ -86,12 +85,16 @@ def train():
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
     # blank out O->I and <s>->I transitions
-    # _transition_prob[_state_space.index('O')][_state_space.index('I')] = _like_zero
+    _transition_prob[_state_space.index('I')][_state_space.index('O')] = _like_zero
 
     # calculate the initial probabilities
-    sentence_beginning_index = _state_space.index(_sentence_marker)
-    for s in range(0, len(_state_space)):
-        _initial_prob.append(_transition_prob[sentence_beginning_index][s])
+    _initial_prob = []
+    for count in initial_count_matrix:
+        prob = count / len_state_space
+        if prob != 0:
+            _initial_prob.append(prob)
+        else:
+            _initial_prob.append(_like_zero)
 
 # pulls out words and pos in sentences
 def getSentences(file_name, dev=True):
@@ -129,12 +132,10 @@ def getSentences(file_name, dev=True):
 # scan through data and build the observation and state spaces
 def buildSpaces():
     global _observation_space
-    global _state_space
     
     # scan through data and find the spaces along with the single counts in the observation space
     _observation_space = []
     all_words = []
-    _state_space = []
     for sentence in _train_data:
         for entry in sentence:
             # pull out the word and pos
@@ -153,9 +154,6 @@ def buildSpaces():
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
 
-    #  add sentence marker (<s>)
-    _state_space = ['B', 'I', 'O', '<s>']
-
     return (len(_observation_space), len(_state_space))
 
 # build the count matrices needed to build the prob matrices
@@ -164,27 +162,36 @@ def buildCountMatrices(len_state_space, len_observation_space):
     # initialize as ones for laplace smoothing
     transition_count_matrix = np.ones((len_state_space, len_state_space))
     emission_count_matrix = np.ones((len_state_space, len_observation_space))
+    intial_count_matrix = np.zeros(len_state_space)
     
     # iterate through training data and count the transitions for pos and emissions for words
     for sentence in _train_data:
-        prev_part = _sentence_marker
+        prev_part = ""
+        first = True
         for entry in sentence:
             cur_word = entry[1]
             cur_part = entry[2]
 
-            # increment the count for the transition count
-            transition_count_matrix[_state_space.index(cur_part)][_state_space.index(prev_part)] += 1
+            if not first:
+                # increment the count for the transition count
+                transition_count_matrix[_state_space.index(cur_part)][_state_space.index(prev_part)] += 1
 
-            # set the previous part
-            prev_part = cur_part
+                # set the previous part
+                prev_part = cur_part
 
-            # increment the count for the emission count
-            try:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
-            except:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
+                # increment the count for the emission count
+                try:
+                    emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
+                except:
+                    emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
+            else:
+                intial_count_matrix[_state_space.index(cur_part)] += 1
+                prev_part = cur_part
+                first = False
 
-    return (transition_count_matrix, emission_count_matrix)
+
+    return (transition_count_matrix, emission_count_matrix, intial_count_matrix)
+
 
 #  build the prob matrices (both transition and emission)
 def buildProbMatrix(num_rows, num_cols, count_matrix):
