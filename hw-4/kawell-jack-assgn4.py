@@ -23,7 +23,7 @@ _test_results_file_name = "test-results.txt"
 _sentence_marker = "<s>"
 
 # global int values for algorithm params
-_encoder = Encoder(vocab_size=10000, pct_bpe=0.88, ngram_min=1, ngram_max=10)
+_encoder = Encoder(vocab_size=10000, pct_bpe=1.00, ngram_min=1, ngram_max=10)
 _dev_partition_ratio = 10
         
 # preprocess the data to create a training and dev set
@@ -80,6 +80,10 @@ def train():
 
     # iterate through training data and count the transitions for entity
     transition_count_matrix, observation_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
+    
+    # blank out O->I and <s>->I transitions
+    transition_count_matrix[_state_space.index('I')][_state_space.index('O')] = 0
+    transition_count_matrix[_state_space.index('I')][_state_space.index(_sentence_marker)] = 0
 
     # find the observation likelihood for the entity given words
     _observation_prob = buildProbMatrix(len_state_space, len_observation_space, observation_count_matrix)
@@ -88,9 +92,9 @@ def train():
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
     # calculate the initial probabilities
-    sentence_beginning_index = _state_space.index(_sentence_marker)
+    sentence_marker_index = _state_space.index(_sentence_marker)
     for s in range(0, len(_state_space)):
-        _initial_prob.append(_transition_prob[sentence_beginning_index][s])
+        _initial_prob.append(_transition_prob[s][sentence_marker_index])
 
 # pulls out words and entity in sentences
 def getSentences(file_name, dev=True):
@@ -135,7 +139,7 @@ def buildSpaces():
     sentence_string = ""
     for sentence in _train_data:
         for entry in sentence:
-            sentence_string += entry[1].lower() + " "
+            sentence_string += entry[1] + " "
             
         all_words += sentence_string
         sentence_string_list.append(sentence_string)
@@ -144,10 +148,10 @@ def buildSpaces():
     
     _encoder.fit(all_words.split('\n'))
 
-
+    # build the tokenized training data
     for sentence in _train_data:
         for entry in sentence:
-            word = entry[1].lower()
+            word = entry[1]
             entity = entry[2]
 
             token = _encoder.tokenize(word)
@@ -164,19 +168,11 @@ def buildSpaces():
         _tokenized_train_x.append(_sentence_marker)
         _tokenized_train_y.append(_sentence_marker)
 
-
-    # count observations and states
-    # obs_counter = Counter(_tokenized_train_x)
-    state_counter = Counter(_tokenized_train_y)
-
     # populate spaces from counters
     _observation_space = list(_encoder.bpe_vocab.keys())
     _observation_space += list(_encoder.word_vocab.keys())
     _observation_space.append(_sentence_marker)
-    _state_space = list(state_counter.keys())
-
-    #  add sentence marker (<s>)
-    _state_space.append(_sentence_marker)
+    _state_space = ['B', 'I', 'O', '<s>']
 
     return (len(_observation_space), len(_state_space))
 
@@ -188,17 +184,17 @@ def buildCountMatrices(len_state_space, len_observation_space):
     emission_count_matrix = np.ones((len_state_space, len_observation_space))
     
     # iterate through training data and count the transitions for entities and emissions for words
-    prev_x = _sentence_marker
+    prev_y = _sentence_marker
     for x, y in zip(_tokenized_train_x, _tokenized_train_y):
 
         # increment the count for the transition count
-        transition_count_matrix[_state_space.index(y)][_state_space.index(prev_x)] += 1
+        transition_count_matrix[_state_space.index(y)][_state_space.index(prev_y)] += 1
 
         # increment the count for the emission count
         emission_count_matrix[_state_space.index(y)][_observation_space.index(x)] += 1
         
         # set the previous entity
-        prev_x = y
+        prev_y = y
 
     return (transition_count_matrix, emission_count_matrix)
 
@@ -216,7 +212,10 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
     for row in range(0, num_rows):
         for col in range(0, num_cols):
             # add num_rows to denominator for laplace smoothing
-            prob_matrix[row][col] = count_matrix[row][col] / (row_sums[row] + num_rows)
+            try:
+                prob_matrix[row][col] = np.log(count_matrix[row][col] / (row_sums[row] + num_rows))
+            except:
+                prob_matrix[row][col] = 0
 
     return prob_matrix
 
@@ -227,7 +226,9 @@ def test(run_file_name, results_file_name):
     results_file = open(results_file_name, "w")
 
     # retrieve data to run through model
-    data = getSentences(run_file_name, dev=False)
+    data = getSentences(run_file_name, dev=True)
+
+    confusion_matrix = np.zeros((3, 3))
             
     # go through data and run viterbi on each sentence, printing the results
     for sentence in data:
@@ -235,7 +236,7 @@ def test(run_file_name, results_file_name):
         observations = []
         for entry in sentence:
             num = entry[0]
-            word = entry[1].lower()
+            word = entry[1]
 
             token = _encoder.tokenize(word)
 
@@ -253,37 +254,54 @@ def test(run_file_name, results_file_name):
 
         # write results to the file
         obs_count = 0
-        sen_count = 0
+        word_count = 0
         prev_num = '1'
+        cur_entities = []
         for num in numbers:
             # pull out the num, word, and predicted entity
             entity = _state_space[best_path[obs_count]]
 
-            if prev_num != num:
+            # check if we've advanced a word
+            if prev_num == num:
+                cur_entities.append(entity)
+            else:
                 # write line
-                results_file.write(prev_num + "\t" + sentence[sen_count][1] + "\t" + entity + "\n")
+                prev_word = sentence[word_count][1]
+                prev_entity = Counter(cur_entities).most_common(1)[0][0]
+                results_file.write(prev_num + "\t" + prev_word + "\t" + prev_entity + "\n")
+
+                # populate confusion matrix
+                predicted_index = _state_space.index(prev_entity)
+                correct_index = _state_space.index(sentence[word_count][2])
+                confusion_matrix[predicted_index][correct_index] += 1
 
                 # set prev_num and sentence count
                 prev_num = num
-                sen_count += 1
+                word_count += 1
+
+                # clear entities list and add current 
+                cur_entities = []
+                cur_entities.append(entity)
 
             # increment count
             obs_count += 1
 
         # write line
-        results_file.write(prev_num + "\t" + sentence[sen_count][1] + "\t" + entity + "\n")
+        results_file.write(prev_num + "\t" + sentence[word_count][1] + "\t" + entity + "\n")
 
         # print line between sentences
         results_file.write("\n")
+
+    print(confusion_matrix)
 
 # implements the viterbi algorithm
 def viterbi(num_states, transition, emission, prob, observations):
 
     # initialize constants for viterbi
     num_observations = len(observations)
-    log_transition = np.log(transition)
-    log_emission = np.log(emission)
-    log_probability = np.log(prob)
+    log_transition = transition
+    log_emission = emission
+    log_probability = prob
 
     # initialize tracking matrices for viterbi
     path_prob = np.zeros((num_observations, num_states))

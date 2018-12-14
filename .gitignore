@@ -2,3 +2,5 @@
 hw-2/.vscode/*
 hw-3/.vscode/*
 hw-4/.vscode/*
+hw-4/dev*
+hw-4/train.txt
