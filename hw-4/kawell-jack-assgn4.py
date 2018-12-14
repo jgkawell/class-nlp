@@ -21,6 +21,7 @@ _unknown_word_marker = "<UNK>"
 
 # global int values for algorithm params
 _dev_partition_ratio = 1 / 10
+_smoothing_value = 0.5
 _like_zero = 2.2250738585072014**-308
         
 # preprocess the data to create a training and dev set
@@ -160,8 +161,8 @@ def buildSpaces():
 def buildCountMatrices(len_state_space, len_observation_space):
 
     # initialize as ones for laplace smoothing
-    transition_count_matrix = np.ones((len_state_space, len_state_space))
-    emission_count_matrix = np.ones((len_state_space, len_observation_space))
+    transition_count_matrix = np.zeros((len_state_space, len_state_space))
+    emission_count_matrix = np.zeros((len_state_space, len_observation_space))
     intial_count_matrix = np.zeros(len_state_space)
     
     # iterate through training data and count the transitions for pos and emissions for words
@@ -207,7 +208,7 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
     for row in range(0, num_rows):
         for col in range(0, num_cols):
             # add num_rows to denominator for laplace smoothing
-            prob_matrix[row][col] = count_matrix[row][col] / (row_sums[row] + num_rows)
+            prob_matrix[row][col] = (count_matrix[row][col] + _smoothing_value) / (row_sums[row] + _smoothing_value * num_rows)
 
     return prob_matrix
 
