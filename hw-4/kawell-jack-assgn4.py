@@ -18,10 +18,11 @@ _test_file_name = "test.txt"
 _dev_results_file_name = "dev-results.txt"
 _test_results_file_name = "test-results.txt"
 _unknown_word_marker = "<UNK>"
-_sentence_marker = "<s>"
 
 # global int values for algorithm params
-_dev_partition_ratio = 10
+_dev_partition_ratio = 1 / 10
+_smoothing_value = 0
+_like_zero = 2.2250738585072014**-308
         
 # preprocess the data to create a training and dev set
 def preprocess():
@@ -43,7 +44,7 @@ def preprocess():
             temp_sentence = []
         
     # get a random sampling of sentence indices
-    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) / _dev_partition_ratio))
+    sample = random.sample(range(len(train_sentences)), int(len(train_sentences) * _dev_partition_ratio))
 
     # pull out the sentences into train and dev sets
     dev_sentences = []
@@ -76,7 +77,7 @@ def train():
     len_observation_space, len_state_space = buildSpaces()
 
     # iterate through training data and count the transitions for pos
-    transition_count_matrix, observation_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
+    transition_count_matrix, observation_count_matrix, initial_count_matrix = buildCountMatrices(len_state_space, len_observation_space)
 
     # find the observation likelihood for the pos given words
     _observation_prob = buildProbMatrix(len_state_space, len_observation_space, observation_count_matrix)
@@ -84,10 +85,17 @@ def train():
     # find the transition probability for pos given previous pos
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
+    # blank out O->I and <s>->I transitions
+    _transition_prob[_state_space.index('O')][_state_space.index('I')] = _like_zero
+
     # calculate the initial probabilities
-    sentence_beginning_index = _state_space.index(_sentence_marker)
-    for s in range(0, len(_state_space)):
-        _initial_prob.append(_transition_prob[sentence_beginning_index][s])
+    _initial_prob = []
+    for count in initial_count_matrix:
+        prob = count / len_state_space
+        if prob != 0:
+            _initial_prob.append(prob)
+        else:
+            _initial_prob.append(_like_zero)
 
 # pulls out words and pos in sentences
 def getSentences(file_name, dev=True):
@@ -135,7 +143,6 @@ def buildSpaces():
         for entry in sentence:
             # pull out the word and pos
             word = entry[1]
-            part = entry[2]
 
             # if word doesn't exist yet in observation space, add it
             # else, try to remove it from the single counts list
@@ -149,10 +156,6 @@ def buildSpaces():
                 except:
                     pass
 
-            # if pos doesn't exist yet in state space, add it
-            if part not in _state_space:
-                _state_space.append(part)
-
     # remove words with only a single count and replace them with <UNK>
     for word in single_counts:
         _observation_space.remove(word)
@@ -160,38 +163,47 @@ def buildSpaces():
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
 
-    #  add sentence marker (<s>)
-    _state_space.append(_sentence_marker)
+    #  populate state space
+    _state_space = ['B', 'I', 'O']
 
     return (len(_observation_space), len(_state_space))
 
 # build the count matrices needed to build the prob matrices
 def buildCountMatrices(len_state_space, len_observation_space):
 
-    # initialize as ones for laplace smoothing
-    transition_count_matrix = np.ones((len_state_space, len_state_space))
-    emission_count_matrix = np.ones((len_state_space, len_observation_space))
+    # initialize for laplace smoothing
+    transition_count_matrix = np.zeros((len_state_space, len_state_space))
+    emission_count_matrix = np.zeros((len_state_space, len_observation_space))
+    intial_count_matrix = np.zeros(len_state_space)
     
     # iterate through training data and count the transitions for pos and emissions for words
     for sentence in _train_data:
-        prev_part = _sentence_marker
+        prev_part = ""
+        first = True
         for entry in sentence:
+            
             cur_word = entry[1]
             cur_part = entry[2]
+            
+            if not first:
 
-            # increment the count for the transition count
-            transition_count_matrix[_state_space.index(cur_part)][_state_space.index(prev_part)] += 1
+                # increment the count for the transition count
+                transition_count_matrix[_state_space.index(prev_part)][_state_space.index(cur_part)] += 1
 
-            # set the previous part
-            prev_part = cur_part
+                # set the previous part
+                prev_part = cur_part
 
-            # increment the count for the emission count
-            try:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
-            except:
-               emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
+                # increment the count for the emission count
+                try:
+                    emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(cur_word)] += 1
+                except:
+                    emission_count_matrix[_state_space.index(cur_part)][_observation_space.index(_unknown_word_marker)] += 1
+            else:
+                intial_count_matrix[_state_space.index(cur_part)] += 1
+                prev_part = cur_part
+                first = False
 
-    return (transition_count_matrix, emission_count_matrix)
+    return (transition_count_matrix, emission_count_matrix, intial_count_matrix)
 
 #  build the prob matrices (both transition and emission)
 def buildProbMatrix(num_rows, num_cols, count_matrix):
@@ -207,18 +219,29 @@ def buildProbMatrix(num_rows, num_cols, count_matrix):
     for row in range(0, num_rows):
         for col in range(0, num_cols):
             # add num_rows to denominator for laplace smoothing
-            prob_matrix[row][col] = count_matrix[row][col] / (row_sums[row] + num_rows)
+            prob_matrix[row][col] = (count_matrix[row][col] + _smoothing_value) / (row_sums[row] + _smoothing_value * num_rows)
 
     return prob_matrix
 
 #  test using viterbi technique
-def test(run_file_name, results_file_name):
+def test(run_file_name, results_file_name, dev):
 
     # create results file
     results_file = open(results_file_name, "w")
 
     # retrieve data to run through model
-    data = getSentences(run_file_name, dev=False)
+    data = getSentences(run_file_name, dev=dev)
+
+    if dev:
+        # initialize confusion matrix
+        confusion_matrix = np.zeros((3, 3))
+        confusion_dict = {
+            "B-B": 0, "B-I": 0, "B-O": 0,
+            "I-B": 0, "I-I": 0, "I-O": 0,
+            "O-B": 0, "O-I": 0, "O-O": 0
+        }
+    
+    unknown_count = 0
             
     # go through data and run viterbi on each sentence, printing the results
     for sentence in data:
@@ -230,6 +253,7 @@ def test(run_file_name, results_file_name):
                 observations.append(_observation_space.index(word))
             except:
                 observations.append(_observation_space.index(_unknown_word_marker))
+                unknown_count += 1
 
         # run viterbi on each sentence
         best_path = viterbi(len(_state_space), _transition_prob, _observation_prob, _initial_prob, observations)
@@ -245,11 +269,35 @@ def test(run_file_name, results_file_name):
             # write line
             results_file.write(num + "\t" + word + "\t" + pos + "\n")
 
+            if dev:
+                # populate confusion matrix
+                predicted = pos
+                correct = sentence[count][2]
+                confusion_matrix[_state_space.index(predicted)][_state_space.index(correct)] += 1
+                
+                key = predicted + "-" + correct
+                value = confusion_dict[key]
+                confusion_dict[key] = value + 1
+
             # increment count
             count += 1
 
         # print line between sentences
         results_file.write("\n")
+
+    if dev:
+        print(confusion_matrix)
+        print(confusion_dict)
+
+    print(unknown_count)
+    print(_transition_prob)
+
+    for s_prev in _state_space:
+        for s_cur in _state_space:
+            key = s_prev + "-" + s_cur
+            confusion_dict[key] = _transition_prob[_state_space.index(s_prev)][_state_space.index(s_cur)]
+
+    print(confusion_dict)
 
 # implements the viterbi algorithm
 def viterbi(num_states, transition, emission, prob, observations):
@@ -271,9 +319,9 @@ def viterbi(num_states, transition, emission, prob, observations):
     # scan through remaining observations and states finding the most probable and saving the backpointer
     for o in range(1, num_observations):
         for s in range(0, num_states):
-            path_prob[o][s] = np.max(path_prob[o-1] + log_transition[s][:]) + log_emission[s][observations[o]]
+            path_prob[o][s] = np.max(path_prob[o-1] + log_transition[:][s]) + log_emission[s][observations[o]]
             # don't need the emission value for back pointer
-            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[s][:])
+            back_pointer[o][s] = np.argmax(path_prob[o-1] + log_transition[:][s])
 
     # pull out the last saved backpointer
     best_pointer = np.argmax(path_prob[-1])
@@ -299,11 +347,11 @@ if  __name__ == "__main__":
 
     # test on the dev set
     print("Running dev data...")
-    test(_dev_file_name, _dev_results_file_name)
+    test(_dev_file_name, _dev_results_file_name, dev=True)
 
     # test on the test set
-    print("Running test data...")
-    test(_test_file_name, _test_results_file_name)
+    # print("Running test data...")
+    # test(_test_file_name, _test_results_file_name, dev=False)
 
     # finished
     print("Finished.")
