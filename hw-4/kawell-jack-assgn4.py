@@ -22,6 +22,7 @@ _sentence_marker = "<s>"
 
 # global int values for algorithm params
 _dev_partition_ratio = 10
+_like_zero = 2.2250738585072014**-308
         
 # preprocess the data to create a training and dev set
 def preprocess():
@@ -84,6 +85,9 @@ def train():
     # find the transition probability for pos given previous pos
     _transition_prob = buildProbMatrix(len_state_space, len_state_space, transition_count_matrix)
 
+    # blank out O->I and <s>->I transitions
+    # _transition_prob[_state_space.index('O')][_state_space.index('I')] = _like_zero
+
     # calculate the initial probabilities
     sentence_beginning_index = _state_space.index(_sentence_marker)
     for s in range(0, len(_state_space)):
@@ -129,39 +133,28 @@ def buildSpaces():
     
     # scan through data and find the spaces along with the single counts in the observation space
     _observation_space = []
-    single_counts = []
+    all_words = []
     _state_space = []
     for sentence in _train_data:
         for entry in sentence:
             # pull out the word and pos
-            word = entry[1]
-            part = entry[2]
+            all_words.append(entry[1])
 
-            # if word doesn't exist yet in observation space, add it
-            # else, try to remove it from the single counts list
-            if word not in _observation_space:
-                _observation_space.append(word)
-                single_counts.append(word)
-            else:
-                # try to remove word if it is in the single counts list
-                try:
-                    single_counts.remove(word)
-                except:
-                    pass
+    # count all words
+    word_counter = Counter(all_words)
 
-            # if pos doesn't exist yet in state space, add it
-            if part not in _state_space:
-                _state_space.append(part)
+    # copy all words
+    _observation_space = list(word_counter.keys())
 
-    # remove words with only a single count and replace them with <UNK>
-    for word in single_counts:
-        _observation_space.remove(word)
+    for word, count in word_counter.items():
+        if count < 2:
+            _observation_space.remove(word)
 
     # add unknown word marker <UNK>
     _observation_space.append(_unknown_word_marker)
 
     #  add sentence marker (<s>)
-    _state_space.append(_sentence_marker)
+    _state_space = ['B', 'I', 'O', '<s>']
 
     return (len(_observation_space), len(_state_space))
 
@@ -302,8 +295,8 @@ if  __name__ == "__main__":
     test(_dev_file_name, _dev_results_file_name)
 
     # test on the test set
-    print("Running test data...")
-    test(_test_file_name, _test_results_file_name)
+    # print("Running test data...")
+    # test(_test_file_name, _test_results_file_name)
 
     # finished
     print("Finished.")
